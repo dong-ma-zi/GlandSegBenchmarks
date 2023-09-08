@@ -13,13 +13,19 @@ import random
 from skimage import measure
 import logging
 from models import DCAN
+from options import Options
 from dataloader import DataFolder
-from my_transforms import get_transforms
+import utils
+# from my_transforms import get_transforms
 
 
 def main():
     global opt, best_iou, num_iter, logger, logger_results
     best_iou = 0
+    opt = Options(isTrain=True)
+    opt.parse()
+    opt.save_options()
+
     os.environ['CUDA_VISIBLE_DEVICES'] = ','.join(str(x) for x in opt.train['gpu'])
 
     # set up logger
@@ -44,25 +50,18 @@ def main():
         global criterion_var
         criterion_var = nn.CrossEntropyLoss()
 
-    data_transforms = {'train': get_transforms(opt.transform['train']),
-                       'val': get_transforms(opt.transform['val'])}
+    # data_transforms = {'train': get_transforms(opt.transform['train']),
+    #                    'val': get_transforms(opt.transform['val'])}
 
     # ----- load data ----- #
     dsets = {}
     for x in ['train', 'val']:
-        img_dir = '{:s}/{:s}'.format(opt.train['img_dir'], x)
-        target_dir = '{:s}/{:s}'.format(opt.train['label_dir'], x)
-        weight_map_dir = '{:s}/{:s}'.format(opt.train['weight_map_dir'], x)
-        dir_list = [img_dir, weight_map_dir, target_dir]
-        post_fix = ['weight.png', 'label.png']
-        # if opt.dataset == 'CRAG':
-        #     post_fix = ['weight.png', 'label.png']
-        # elif opt.dataset == 'GlaS':
-        #     post_fix = ['weight.png', 'anno.bmp']
-        # else:
-        #     raise 'not correct dataset!'
-        num_channels = [3, 1, 3]
-        dsets[x] = DataFolder(dir_list, post_fix, num_channels, data_transforms[x])
+        img_dir = '/home/data2/MedImg/GlandSeg/CRAG/train/Images/'
+        target_dir = '/home/data2/MedImg/GlandSeg/CRAG/train/Annotation/'
+        dir_list = [img_dir, target_dir]
+        # post_fix = ['weight.png', 'label.png']
+
+        dsets[x] = DataFolder(dir_list, data_transform=None)
     train_loader = DataLoader(dsets['train'], batch_size=opt.train['batch_size'], shuffle=True,
                               num_workers=opt.train['workers'])
     val_loader = DataLoader(dsets['val'], batch_size=1, shuffle=False,
@@ -110,14 +109,6 @@ def main():
         logger_results.info('{:d}\t{:.4f}\t{:.4f}\t{:.4f}\t{:.4f}\t{:.4f}\t{:.4f}\t{:.4f}\t{:.4f}'
                             .format(epoch+1, train_loss, train_loss_ce, train_loss_var, train_pixel_acc,
                                     train_iou, val_loss, val_pixel_acc, val_iou))
-        # tensorboard logs
-    #     tb_writer.add_scalars('epoch_losses',
-    #                           {'train_loss': train_loss, 'train_loss_ce': train_loss_ce,
-    #                            'train_loss_var': train_loss_var, 'val_loss': val_loss}, epoch)
-    #     tb_writer.add_scalars('epoch_accuracies',
-    #                           {'train_pixel_acc': train_pixel_acc, 'train_iou': train_iou,
-    #                            'val_pixel_acc': val_pixel_acc, 'val_iou': val_iou}, epoch)
-    # tb_writer.close()
 
 
 def train(train_loader, model, optimizer, criterion, epoch):
