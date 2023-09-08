@@ -1,4 +1,10 @@
 """
+Author: my
+Since: 2023-9-8
+Modifier: wzh
+"""
+
+"""
 This script defines several transforms that can be used for (image, label) image pairs.
 Most of the transforms are based on the code of torchvision.
 These transforms are useful when input and label are both images.

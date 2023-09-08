@@ -1,3 +1,8 @@
+"""
+Author: my
+Since: 2023-9-8
+Modifier: wzh
+"""
 
 import torch
 import torch.nn as nn
@@ -9,13 +14,22 @@ import torch.utils.data
 import os
 import shutil
 import numpy as np
-import random
 from skimage import measure
 import logging
 from models import DCAN
 from dataloader import DataFolder
 from my_transforms import get_transforms
+import utils
+import argparse
 
+parser = argparse.ArgumentParser(description="Train DCAN Model")
+parser.add_argument('--batch-size', type=int, default=4, help='input batch size for training')
+parser.add_argument('--lr', type=float, default=1e-3, help='learning rate')
+parser.add_argument('--weight_decay', type=float, default=1e-4, help='weight decay')
+parser.add_argument('--checkpoint', type=str, default=None, help='start from checkpoint')
+parser.add_argument('--checkpoint_freq', type=int, default=10, help='epoch to save checkpoints')
+parser.add_argument('--epochs', type=int, default=100, help='number of epochs to train')
+args = parser.parse_args()
 
 def main():
     global opt, best_iou, num_iter, logger, logger_results
@@ -33,16 +47,11 @@ def main():
     torch.backends.cudnn.benchmark = True
 
     # ----- define optimizer ----- #
-    optimizer = torch.optim.Adam(model.parameters(), opt.train['lr'], betas=(0.9, 0.99),
-                                 weight_decay=opt.train['weight_decay'])
+    optimizer = torch.optim.Adam(model.parameters(), args.lr, betas=(0.9, 0.99),
+                                 weight_decay=args.weight_decay)
 
     # ----- define criterion ----- #
-    criterion = torch.nn.NLLLoss(reduction='none').cuda()
-
-    if opt.train['alpha'] > 0:
-        logger.info('=> Using variance term in loss...')
-        global criterion_var
-        criterion_var = nn.CrossEntropyLoss()
+    criterion = nn.CrossEntropyLoss()
 
     data_transforms = {'train': get_transforms(opt.transform['train']),
                        'val': get_transforms(opt.transform['val'])}
@@ -55,12 +64,7 @@ def main():
         weight_map_dir = '{:s}/{:s}'.format(opt.train['weight_map_dir'], x)
         dir_list = [img_dir, weight_map_dir, target_dir]
         post_fix = ['weight.png', 'label.png']
-        # if opt.dataset == 'CRAG':
-        #     post_fix = ['weight.png', 'label.png']
-        # elif opt.dataset == 'GlaS':
-        #     post_fix = ['weight.png', 'anno.bmp']
-        # else:
-        #     raise 'not correct dataset!'
+
         num_channels = [3, 1, 3]
         dsets[x] = DataFolder(dir_list, post_fix, num_channels, data_transforms[x])
     train_loader = DataLoader(dsets['train'], batch_size=opt.train['batch_size'], shuffle=True,
@@ -68,24 +72,25 @@ def main():
     val_loader = DataLoader(dsets['val'], batch_size=1, shuffle=False,
                             num_workers=opt.train['workers'])
 
+    start_epoch = 0
     # ----- optionally load from a checkpoint for validation or resuming training ----- #
-    if opt.train['checkpoint']:
-        if os.path.isfile(opt.train['checkpoint']):
-            logger.info("=> loading checkpoint '{}'".format(opt.train['checkpoint']))
-            checkpoint = torch.load(opt.train['checkpoint'])
-            opt.train['start_epoch'] = checkpoint['epoch']
+    if args.checkpoint:
+        if os.path.isfile(args.checkpoint):
+            logger.info("=> loading checkpoint '{}'".format(args.checkpoint))
+            checkpoint = torch.load(args.checkpoint)
+            start_epoch = checkpoint['epoch']
             best_iou = checkpoint['best_iou']
             model.load_state_dict(checkpoint['state_dict'])
             optimizer.load_state_dict(checkpoint['optimizer'])
             logger.info("=> loaded checkpoint '{}' (epoch {})"
-                        .format(opt.train['checkpoint'], checkpoint['epoch']))
+                        .format(args.checkpoint, checkpoint['epoch']))
         else:
-            logger.info("=> no checkpoint found at '{}'".format(opt.train['checkpoint']))
+            logger.info("=> no checkpoint found at '{}'".format(args.checkpoint))
 
     # ----- training and validation ----- #
-    for epoch in range(opt.train['start_epoch'], opt.train['num_epochs']):
+    for epoch in range(start_epoch, args.epoch):
         # train for one epoch or len(train_loader) iterations
-        logger.info('Epoch: [{:d}/{:d}]'.format(epoch+1, opt.train['num_epochs']))
+        logger.info('Epoch: [{:d}/{:d}]'.format(epoch+1, args.epoch))
         train_results = train(train_loader, model, optimizer, criterion, epoch)
         train_loss, train_loss_ce, train_loss_var, train_pixel_acc, train_iou = train_results
 
@@ -97,7 +102,7 @@ def main():
         is_best = val_iou > best_iou
         best_iou = max(val_iou, best_iou)
 
-        cp_flag = (epoch+1) % opt.train['checkpoint_freq'] == 0
+        cp_flag = (epoch+1) % args.checkpoint_freq == 0
 
         save_checkpoint({
             'epoch': epoch + 1,
@@ -110,14 +115,6 @@ def main():
         logger_results.info('{:d}\t{:.4f}\t{:.4f}\t{:.4f}\t{:.4f}\t{:.4f}\t{:.4f}\t{:.4f}\t{:.4f}'
                             .format(epoch+1, train_loss, train_loss_ce, train_loss_var, train_pixel_acc,
                                     train_iou, val_loss, val_pixel_acc, val_iou))
-        # tensorboard logs
-    #     tb_writer.add_scalars('epoch_losses',
-    #                           {'train_loss': train_loss, 'train_loss_ce': train_loss_ce,
-    #                            'train_loss_var': train_loss_var, 'val_loss': val_loss}, epoch)
-    #     tb_writer.add_scalars('epoch_accuracies',
-    #                           {'train_pixel_acc': train_pixel_acc, 'train_iou': train_iou,
-    #                            'val_pixel_acc': val_pixel_acc, 'val_iou': val_iou}, epoch)
-    # tb_writer.close()
 
 
 def train(train_loader, model, optimizer, criterion, epoch):
@@ -158,10 +155,8 @@ def train(train_loader, model, optimizer, criterion, epoch):
             for k in range(target.size(0)):
                 target_labeled[k] = torch.from_numpy(measure.label(target[k].numpy() == 1))
                 # utils.show_figures((target[k].numpy(), target[k].numpy()==1, target_labeled[k].numpy()))
-            loss_var = criterion_var(prob_maps, target_labeled.cuda())
-            loss = loss_CE + opt.train['alpha'] * loss_var
+            loss = loss_CE
         else:
-            loss_var = torch.ones(1) * -1
             loss = loss_CE
 
         # measure accuracy and record loss
@@ -169,7 +164,7 @@ def train(train_loader, model, optimizer, criterion, epoch):
         metrics = utils.accuracy_pixel_level(pred, target.numpy())
         pixel_accu, iou = metrics[0], metrics[1]
 
-        result = [loss.item(), loss_CE.item(), loss_var.item(), pixel_accu, iou]
+        result = [loss.item(), loss_CE.item(), pixel_accu, iou]
         results.update(result, input.size(0))
 
         # compute gradient and do SGD step
@@ -236,8 +231,7 @@ def validate(val_loader, model, criterion):
             for k in range(target.size(0)):
                 target_labeled[k] = torch.from_numpy(measure.label(target[k].numpy() == 1))
                 # utils.show_figures((target[k].numpy(), target[k].numpy()==1, target_labeled[k].numpy()))
-            loss_var = criterion_var(prob_maps, target_labeled.cuda())
-            loss = loss_CE + opt.train['alpha'] * loss_var
+            loss = loss_CE
         else:
             loss = loss_CE
 
