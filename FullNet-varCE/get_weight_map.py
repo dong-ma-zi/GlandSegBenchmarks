@@ -45,21 +45,22 @@ def weight_map():
         boundaries = [cv2.findContours((img == i).astype(np.uint8), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)[0]
                       for i in indices]
 
-        print('=> extracting boundaries...')
-        w = np.zeros((m, n))
-        if len(boundaries) >= 2:
-            for i in range(m):
-                if i % 50 == 0:
-                    print(f'=> processing rows {i} ~ {i + 50}')
-                for j in range(n):
-                    d1, d2 = compute_distances(i, j, boundaries)
-                    w[i, j] = w0 * np.exp(-(d1 + d2) ** 2 / (2 * sigma ** 2))
 
-        # The weight map is multiplied by 20 to reduce the loss of small values,
-        # so they are divided by 20 in the training code.
-        # One can also use large bit depth to preserve details.
-        save_path = os.path.join(save_dir, f'{img_filename[:-4]}_weight.png')
-        cv2.imwrite(save_path, ((w + 1) * 20 / 255.0))
+        print('=> extracting boundaries...')
+        # w = np.zeros((m, n))
+        # if len(boundaries) >= 2:
+        #     for i in range(m):
+        #         if i % 50 == 0:
+        #             print(f'=> processing rows {i} ~ {i + 50}')
+        #         for j in range(n):
+        #             d1, d2 = compute_distances(i, j, boundaries)
+        #             w[i, j] = w0 * np.exp(-(d1 + d2) ** 2 / (2 * sigma ** 2))
+        #
+        # # The weight map is multiplied by 20 to reduce the loss of small values,
+        # # so they are divided by 20 in the training code.
+        # # One can also use large bit depth to preserve details.
+        # save_path = os.path.join(save_dir, f'{img_filename[:-4]}_weight.png')
+        # cv2.imwrite(save_path, ((w + 1) * 20 / 255.0))
 
 
 if __name__ == "__main__":
