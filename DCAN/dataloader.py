@@ -8,11 +8,14 @@ import os
 from PIL import Image
 import numpy as np
 import cv2
+import torchvision.transforms as transforms
 
 IMG_EXTENSIONS = [
     '.jpg', '.JPG', '.jpeg', '.JPEG',
     '.png', '.PNG', '.ppm', '.PPM', '.bmp', '.BMP',
 ]
+
+transforms = transforms.Compose([transforms.ToTensor()])
 
 
 def is_image_file(filename):
@@ -51,7 +54,7 @@ def get_imgs_list(dir_list):
 
 # dataset that supports one input image, one target image, and one weight map (optional)
 class DataFolder(data.Dataset):
-    def __init__(self, dir_list, data_transform=None, loader=img_loader):
+    def __init__(self, dir_list, data_transform=transforms, loader=img_loader):
         super(DataFolder, self).__init__()
 
         self.img_list = get_imgs_list(dir_list)
@@ -80,11 +83,12 @@ class DataFolder(data.Dataset):
         kernel = np.ones((3, 3), np.uint8)
         label_contour = cv2.dilate(label_contour, kernel, iterations=1)
 
-        cv2.imwrite('test.png', label_contour * 255)
+        # cv2.imwrite('test.png', label_contour * 255)
 
         # if self.data_transform is not None:
         #     sample = self.data_transform(sample)
 
+        img = self.data_transform(img)
         return img, label, label_contour
 
     def __len__(self):
