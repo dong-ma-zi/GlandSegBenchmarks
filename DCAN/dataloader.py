@@ -80,7 +80,7 @@ class DataFolder(data.Dataset):
         kernel = np.ones((3, 3), np.uint8)
         label_contour = cv2.dilate(label_contour, kernel, iterations=1)
 
-        cv2.imwrite('test.png', label_contour * 255)
+        # cv2.imwrite('test.png', label_contour * 255)
 
         # if self.data_transform is not None:
         #     sample = self.data_transform(sample)
