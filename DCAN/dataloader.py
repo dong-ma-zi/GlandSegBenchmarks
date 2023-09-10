@@ -69,21 +69,40 @@ class DataFolder(data.Dataset):
         img = np.array(Image.open(img_paths[0]).convert('RGB'))
         label = np.array(Image.open(img_paths[1]))
 
-        indices = np.unique(label)
+        padding_size = 32
+        label_padding = cv2.copyMakeBorder(label, padding_size,
+                                           padding_size, padding_size, padding_size, cv2.BORDER_REFLECT)
+        indices = np.unique(label_padding)
         indices = indices[indices != 0]
-        boundaries = [cv2.findContours((label == i).astype(np.uint8), cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)[0][0]
-                      for i in indices]
-        label_contour = np.zeros_like(label).astype(np.uint8)
+        # boundaries = [cv2.findContours((label_padding == i).astype(np.uint8), cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)[0][0]
+        #               for i in indices]
 
+        boundaries = []
+        for i in indices:
+            boundaries += cv2.findContours((label_padding == i).astype(np.uint8), cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)[0]
+
+
+        label_contour_with_padding = np.zeros_like(label_padding).astype(np.uint8)
 
         # for contour in range(len(boundaries)):
         #     img_contour = cv2.drawContours(label_contour, boundaries, contour, (1), 1)
+        label_contour_with_padding = cv2.drawContours(label_contour_with_padding, boundaries, -1, (1), 1)
 
-        label_contour = cv2.drawContours(label_contour, boundaries, -1, (1), 1)
+        label_contour = label_contour_with_padding[padding_size:-padding_size,
+                                                   padding_size:-padding_size]
+
         kernel = np.ones((3, 3), np.uint8)
         label_contour = cv2.dilate(label_contour, kernel, iterations=1)
 
-        # cv2.imwrite('test.png', label_contour * 255)
+        # resized_label_padding = cv2.resize(label_padding, (480, 480), interpolation= cv2.INTER_NEAREST)
+        # # resized_contour_padding = cv2.resize(label_contour_with_padding, (480, 480), interpolation=cv2.INTER_AREA)
+        # label_show = np.array(label != 0, dtype=np.int32)
+        # data_show = np.concatenate([label_show * 255,
+        #                             resized_label_padding * 255,
+        #                             label_contour * 255],
+        #                            axis=1)
+        #
+        # cv2.imwrite(f'test/test_{index}.png', data_show)
 
         # if self.data_transform is not None:
         #     sample = self.data_transform(sample)
