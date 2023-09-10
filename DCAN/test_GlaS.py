@@ -6,12 +6,9 @@ import numpy as np
 from PIL import Image
 import skimage.morphology as morph
 from skimage import measure, io
-from models import DCAN
+from DCAN.models.fcn import DCAN
 import utils
-# import time
 from metrics import ObjectHausdorff, ObjectDice, ObjectF1score
-from options import Options
-from my_transforms import get_transforms
 # from vis import draw_overlay_rand
 import torchvision.transforms as transforms
 import argparse
@@ -26,7 +23,7 @@ parser.add_argument('--epochs', type=int, default=100, help='number of epochs to
 parser.add_argument('--save_dir', type=str, default='./experiments/')
 parser.add_argument('--img_dir', type=str, default='/home/data2/MedImg/GlandSeg/GlaS/test/Images')
 parser.add_argument('--label_dir', type=str, default='/home/data2/MedImg/GlandSeg/GlaS/test/Annotation')
-parser.add_argument('--model_path', type=str, default='/home/data1/wzh/code/GlandSegBenchmarks/DCAN/experiments/GlaS/100/checkpoints/checkpoint_100.pth.tar')
+parser.add_argument('--model_path', type=str, default='/home/data1/wzh/code/GlandSegBenchmarks/DCAN/experiments/GlaS/200/checkpoints/checkpoint_200.pth.tar')
 parser.add_argument('--dataset', type=str, choices=['GlaS', 'CRAG'], default='GlaS', help='which dataset be used')
 parser.add_argument('--gpu', type=list, default=[3,], help='GPUs for training')
 
@@ -40,9 +37,9 @@ def main():
 
     img_dir = args.img_dir
     label_dir = args.label_dir
-    save_dir = args.save_dir
+    save_dir = "%s/%s" % (args.save_dir, args.dataset)
     model_path = args.model_path
-    save_flag = False
+    save_flag = True
     tta = False
 
     # check if it is needed to compute accuracies
@@ -59,9 +56,11 @@ def main():
 
     # ----- load trained model ----- #
     print("=> loading trained model")
+    test = torch.load("deeplab_largeFOV.pth")
     best_checkpoint = torch.load(model_path)
 
     model.load_state_dict(best_checkpoint['state_dict'])
+    epoch = best_checkpoint['epoch']
     print("=> loaded model at epoch {}".format(best_checkpoint['epoch']))
 
     # switch to evaluate mode
@@ -79,8 +78,8 @@ def main():
         if not os.path.exists(save_dir):
             os.mkdir(save_dir)
         strs = img_dir.split('/')
-        prob_maps_folder = '{:s}/{:s}/'.format(save_dir, args.dataset, strs[-1])
-        seg_folder = '{:s}/{:s}/{:s}_segmentation'.format(save_dir, args.dataset, strs[-1])
+        prob_maps_folder = '{:s}/{:s}/'.format(args.save_dir, args.dataset, strs[-1])
+        seg_folder = '{:s}/{:s}/{:s}_segmentation'.format(args.save_dir, args.dataset, strs[-1])
         if not os.path.exists(prob_maps_folder):
             os.mkdir(prob_maps_folder)
         if not os.path.exists(seg_folder):
@@ -104,7 +103,7 @@ def main():
         input = test_transform(img).unsqueeze(0)
 
         print('\tComputing output probability maps...')
-        prob_maps = get_probmaps(input, model)
+        pred = get_predmaps(input, model)
         # if tta:
         #     img_hf = img.transpose(Image.FLIP_LEFT_RIGHT)  # horizontal flip
         #     img_vf = img.transpose(Image.FLIP_TOP_BOTTOM)  # vertical flip
@@ -148,15 +147,16 @@ def main():
         #     prob_maps = (prob_maps + prob_maps_hf + prob_maps_vf + prob_maps_hvf
         #                  + prob_maps_r90 + prob_maps_r90_hf + prob_maps_r90_vf + prob_maps_r90_hvf) / 8
 
-        pred = np.argmax(prob_maps, axis=0)  # prediction
+        # pred = np.argmax(prob_maps, axis=0)  # prediction
         pred_inside = pred == 1
         pred2 = morph.remove_small_objects(pred_inside, args.min_area)  # remove small object
 
-        if 'scale' in opt.transform['test']:
-            pred2 = Image.fromarray(pred2.astype(np.uint8) * 255).resize((ori_w, ori_h), resample=Image.BILINEAR)
-            pred2 = np.array(pred2)
-            # pred2 = misc.imresize(pred2.astype(np.uint8) * 255, (ori_h, ori_w), interp='bilinear')
-            pred2 = (pred2 > 127.5)
+        # if 'scale' in opt.transform['test']:
+        #     pred2 = Image.fromarray(pred2.astype(np.uint8) * 255).resize((ori_w, ori_h), resample=Image.BILINEAR)
+        #     pred2 = np.array(pred2)
+        #     # pred2 = misc.imresize(pred2.astype(np.uint8) * 255, (ori_h, ori_w), interp='bilinear')
+        #     pred2 = (pred2 > 127.5)
+
 
         pred_labeled = measure.label(pred2)   # connected component labeling
         pred_labeled = morph.dilation(pred_labeled, footprint=morph.disk(args.radius))
@@ -175,16 +175,22 @@ def main():
             objHaus = ObjectHausdorff(pred_labeled, label_img)
             single_image_result = (objF1, objDice, objHaus)
             accumulated_metrics += utils.gland_accuracy_object_level_all_images(pred_labeled, label_img)
-
             all_results[name] = tuple([pixel_accu, *single_image_result])
+
+            # 打印每张test的指标
+            print('Pixel Acc: {r[0]:.4f}\n'
+                  'F1: {r[1]:.4f}\n'
+                  'dice: {r[2]:.4f}\n'
+                  'haus: {r[3]:.4f}'.format(r=[pixel_accu, objF1, objDice, objHaus]))
 
         # save image
         if save_flag:
             print('\tSaving image results...')
-            io.imsave('{:s}/{:s}_prob_inside.png'.format(prob_maps_folder, name), (prob_maps[1,:,:] * 255).astype(np.uint8))
-            io.imsave('{:s}/{:s}_prob_contour.png'.format(prob_maps_folder, name), (prob_maps[2,:,:] * 255).astype(np.uint8))
+            #io.imsave('{:s}/{:s}_prob_inside.png'.format(prob_maps_folder, name), (prob_maps[1,:,:] * 255).astype(np.uint8))
+            #io.imsave('{:s}/{:s}_prob_contour.png'.format(prob_maps_folder, name), (prob_maps[2,:,:] * 255).astype(np.uint8))
             # final_pred = Image.fromarray(pred_labeled.astype(np.uint16))
-            # final_pred.save('{:s}/{:s}_seg.tiff'.format(seg_folder, name))
+            final_pred = Image.fromarray(pred_labeled.astype(np.uint8) * 100)
+            final_pred.save('{:s}/{:s}_seg.jpg'.format(seg_folder, name))
 
             # save colored objects
             # blank = np.ones(shape=(ori_h, 5, 3)) * 255
@@ -221,7 +227,7 @@ def main():
     avg_haus = np.nanmean(avg_haus)
     header = ['pixel_acc', 'objF1', 'objDice', 'objHaus']
     save_results(header, [avg_pq, avg_f1, avg_dice, avg_haus], all_results,
-                 '{:s}/test_result.txt'.format(save_dir))
+                 '{:s}/test_result_epoch{}.txt'.format(save_dir, epoch))
 
     TP, FP, FN, dice_g, dice_s, iou_g, iou_s, hausdorff_g, hausdorff_s, \
     gt_objs_area, pred_objs_area = accumulated_metrics
@@ -249,18 +255,20 @@ def main():
         strs = img_dir.split('/')
         header = ['pixel_acc','recall', 'precision', 'F1', 'Dice', 'IoU', 'Hausdorff']
         save_results(header, avg_results, all_results,
-                     '{:s}/{:s}_test_result_ck.txt'.format(save_dir, strs[-1]))
+                     '{:s}/{:s}_test_result_ck_epoch{}.txt'.format(save_dir, strs[-1], epoch))
 
 
-def get_probmaps(input, model):
+def get_predmaps(input, model):
     with torch.no_grad():
         o_output, _, _, _, c_output, _, _, _ = model(input.cuda())
 
     prob_o_maps = F.softmax(o_output[0], dim=0).cpu().numpy()
     prob_c_maps = F.softmax(c_output[0], dim=0).cpu().numpy()
-    prob_maps = prob_o_maps - prob_c_maps
-    prob_maps[prob_maps < 0] = 0
-    return prob_maps
+    pred_o = np.argmax(prob_o_maps, axis=0)
+    pred_c = np.argmax(prob_c_maps, axis=0)
+    pred = pred_o - pred_c
+    pred[pred < 0] = 0
+    return pred
 
 
 def save_results(header, avg_results, all_results, filename, mode='w'):

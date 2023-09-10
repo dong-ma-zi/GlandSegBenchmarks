@@ -5,8 +5,9 @@ Since: 2023-9-8
 import torch
 import torch.nn as nn
 import numpy as np
+import torch.nn.functional as F
 torch.cuda.set_device(1)
-
+from torchvision.models import alexnet
 
 class DCAN(nn.Module):
     def __init__(self, n_class=3):
@@ -84,6 +85,7 @@ class DCAN(nn.Module):
                 m.weight.data.copy_(initial_weight)
 
     def forward(self, x):
+        _, _, height, width = x.size()
         h = x
         h = self.relu1(self.conv1(h))
         h = self.pool1(h)  # 1/2
@@ -114,6 +116,7 @@ class DCAN(nn.Module):
         o_c2 = self.o_classifier2(self.o_conv2(o_u2))
         o_c3 = self.o_classifier3(self.o_conv3(o_u3))
         o_output = o_c1 + o_c2 + o_c3
+        o_output = F.interpolate(o_output, size=(height, width), mode='bilinear', align_corners=True)
 
         # contour
         c_u1 = self.c_upscore1(z6)
@@ -123,6 +126,7 @@ class DCAN(nn.Module):
         c_c2 = self.c_classifier2(self.c_conv2(c_u2))
         c_c3 = self.c_classifier3(self.c_conv3(c_u3))
         c_output = c_c1 + c_c2 + c_c3
+        c_output = F.interpolate(c_output, size=(height, width), mode='bilinear', align_corners=True)
 
         return o_output, o_c1, o_c2, o_c3, c_output, c_c1, c_c2, c_c3
 

@@ -13,7 +13,7 @@ import os
 import shutil
 import numpy as np
 import logging
-from models import DCAN
+from models.deeplab import DCAN
 from options import Options
 from dataloader import DataFolder
 
@@ -27,10 +27,11 @@ parser.add_argument('--lr', type=float, default=1e-3, help='learning rate')
 parser.add_argument('--weight_decay', type=float, default=1e-4, help='weight decay')
 parser.add_argument('--checkpoint', type=str, default=None, help='start from checkpoint')
 parser.add_argument('--checkpoint_freq', type=int, default=10, help='epoch to save checkpoints')
-parser.add_argument('--epochs', type=int, default=100, help='number of epochs to train')
+parser.add_argument('--epochs', type=int, default=400, help='number of epochs to train')
 parser.add_argument('--save_dir', type=str, default='./experiments/')
 parser.add_argument('--dataset', type=str, choices=['GlaS', 'CRAG'], default='GlaS', help='which dataset be used')
 parser.add_argument('--gpu', type=list, default=[3,], help='GPUs for training')
+parser.add_argument('--discount_weight', type=float, default=1, help='discount weight')
 args = parser.parse_args()
 
 def main():
@@ -51,9 +52,10 @@ def main():
     model = model.cuda()
     torch.backends.cudnn.benchmark = True
 
-    # ----- define optimizer ----- #
+    # ----- define optimizer and lr_scheduler----- #
     optimizer = torch.optim.Adam(model.parameters(), args.lr, betas=(0.9, 0.99),
                                  weight_decay=args.weight_decay)
+    scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[100, 200, 300], gamma=0.1)
 
     # ----- define criterion ----- #
     criterion = nn.CrossEntropyLoss()
@@ -87,6 +89,10 @@ def main():
         else:
             logger.info("=> no checkpoint found at '{}'".format(args.checkpoint))
 
+    # ----- 如果从epoch 0开始迭代，加载预训练权重 ----- #
+    if start_epoch == 0:
+        model.load_state_dict(torch.load("DCAN_pretrained_weight.pth"), strict=False)
+
     # ----- training and validation ----- #
     for epoch in range(start_epoch, args.epochs):
         # train for one epoch or len(train_loader) iterations
@@ -103,16 +109,20 @@ def main():
         best_iou = max(val_iou, best_iou)
 
         cp_flag = (epoch+1) % args.checkpoint_freq == 0
+        scheduler.step()
+        if epoch != 0 and (epoch + 1) % 100 == 0:
+            args.discount_weight = 0.1 * args.discount_weight
 
-        save_dir = "%s/%s/%d/" % (args.save_dir, args.dataset, epoch+1)
-        if not os.path.exists(save_dir):
-            os.mkdir(save_dir)
-        save_checkpoint({
-            'epoch': epoch + 1,
-            'state_dict': model.state_dict(),
-            'best_iou': best_iou,
-            'optimizer' : optimizer.state_dict(),
-        }, epoch, is_best, save_dir, cp_flag)
+        if cp_flag:
+            save_dir = "%s/%s/%d/" % (args.save_dir, args.dataset, epoch + 1)
+            if not os.path.exists(save_dir):
+                os.mkdir(save_dir)
+            save_checkpoint({
+                'epoch': epoch + 1,
+                'state_dict': model.state_dict(),
+                'best_iou': best_iou,
+                'optimizer' : optimizer.state_dict(),
+            }, epoch, is_best, save_dir, cp_flag)
 
         # save the training results to txt files
         logger_results.info('{:d}\t{:.4f}\t{:.4f}\t{:.4f}\t{:.4f}\t{:.4f}\t{:.4f}\t{:.4f}\t{:.4f}'
@@ -210,8 +220,12 @@ def validate(val_loader, model, criterion):
         loss_contour2 = criterion(c_c2, label_contour)
         loss_contour3 = criterion(c_c3, label_contour)
 
-        loss_o = loss_object + loss_object1 + loss_object2 + loss_object3
-        loss_c = loss_contour + loss_contour1 + loss_contour2 + loss_contour3
+        loss_o = loss_object + args.discount_weight * loss_object1 \
+                 + args.discount_weight * loss_object2 \
+                 + args.discount_weight * loss_object3
+        loss_c = loss_contour + args.discount_weight * loss_contour1\
+                 + args.discount_weight * loss_contour2\
+                 + args.discount_weight * loss_contour3
         loss = loss_o + loss_c
 
         # measure accuracy and record loss
