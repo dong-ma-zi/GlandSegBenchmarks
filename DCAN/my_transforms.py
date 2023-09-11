@@ -71,30 +71,32 @@ class ToTensor(object):
                 pic = torch.from_numpy(img.transpose((2, 0, 1)))
                 # backward compatibility
                 pics.append(pic.float().div(255))
-
-            # handle PIL Image
-            if img.mode == 'I':
-                pic = torch.from_numpy(np.array(img, np.int32, copy=False))
-            elif img.mode == 'I;16':
-                pic = torch.from_numpy(np.array(img, np.int16, copy=False))
             else:
-                pic = torch.ByteTensor(torch.ByteStorage.from_buffer(img.tobytes()))
-
-            # PIL image mode: 1, L, P, I, F, RGB, YCbCr, RGBA, CMYK
-            if img.mode == 'YCbCr':
-                nchannel = 3
-            elif img.mode == 'I;16':
-                nchannel = 1
-            else:
-                nchannel = len(img.mode)
-            pic = pic.view(img.size[1], img.size[0], nchannel)
-            # put it from HWC to CHW format
-            # yikes, this transpose takes 80% of the loading time/CPU
-            pic = pic.transpose(0, 1).transpose(0, 2).contiguous()
-            if isinstance(pic, torch.ByteTensor):
+                pic = torch.from_numpy(np.array(img, np.uint8).transpose(2, 0, 1))
                 pics.append(pic.float().div(255))
-            else:
-                pics.append(pic)
+            # # handle PIL Image
+            # if img.mode == 'I':
+            #     pic = torch.from_numpy(np.array(img, np.int32, copy=False))
+            # elif img.mode == 'I;16':
+            #     pic = torch.from_numpy(np.array(img, np.int16, copy=False))
+            # else:
+            #     pic = torch.ByteTensor(torch.ByteStorage.from_buffer(img.tobytes()))
+            #
+            # # PIL image mode: 1, L, P, I, F, RGB, YCbCr, RGBA, CMYK
+            # if img.mode == 'YCbCr':
+            #     nchannel = 3
+            # elif img.mode == 'I;16':
+            #     nchannel = 1
+            # else:
+            #     nchannel = len(img.mode)
+            # pic = pic.view(img.size[1], img.size[0], nchannel)
+            # # put it from HWC to CHW format
+            # # yikes, this transpose takes 80% of the loading time/CPU
+            # pic = pic.transpose(0, 1).transpose(0, 2).contiguous()
+            # if isinstance(pic, torch.ByteTensor):
+            #     pics.append(pic.float().div(255))
+            # else:
+            #     pics.append(pic)
 
         # process labels:
         for i in range(self.index, len(imgs)):
@@ -105,28 +107,29 @@ class ToTensor(object):
                 label_tensor = torch.from_numpy(label)
                 # backward compatibility
                 pics.append(label_tensor.long())
-
-            # handle PIL Image
-            if label.mode == 'I':
-                label_tensor = torch.from_numpy(np.array(label, np.int32, copy=False))
-            elif label.mode == 'I;16':
-                label_tensor = torch.from_numpy(np.array(label, np.int16, copy=False))
             else:
-                label_tensor = torch.ByteTensor(torch.ByteStorage.from_buffer(label.tobytes()))
-            # PIL image mode: 1, L, P, I, F, RGB, YCbCr, RGBA, CMYK
-            if label.mode == 'YCbCr':
-                nchannel = 3
-            elif label.mode == 'I;16':
-                nchannel = 1
-            else:
-                nchannel = len(label.mode)
-            label_tensor = label_tensor.view(label.size[1], label.size[0], nchannel)
-            # put it from HWC to CHW format
-            # yikes, this transpose takes 80% of the loading time/CPU
-            label_tensor = label_tensor.transpose(0, 1).transpose(0, 2).contiguous()
-            # label_tensor = label_tensor.view(label.size[1], label.size[0])
-            pics.append(label_tensor.long())
-
+                label_tensor = torch.from_numpy(np.array(label, np.int32))
+                pics.append(label_tensor.long())
+            # # handle PIL Image
+            # if label.mode == 'I':
+            #     label_tensor = torch.from_numpy(np.array(label, np.int32, copy=False))
+            # elif label.mode == 'I;16':
+            #     label_tensor = torch.from_numpy(np.array(label, np.int16, copy=False))
+            # else:
+            #     label_tensor = torch.ByteTensor(torch.ByteStorage.from_buffer(label.tobytes()))
+            # # PIL image mode: 1, L, P, I, F, RGB, YCbCr, RGBA, CMYK
+            # if label.mode == 'YCbCr':
+            #     nchannel = 3
+            # elif label.mode == 'I;16':
+            #     nchannel = 1
+            # else:
+            #     nchannel = len(label.mode)
+            # label_tensor = label_tensor.view(label.size[1], label.size[0], nchannel)
+            # # put it from HWC to CHW format
+            # # yikes, this transpose takes 80% of the loading time/CPU
+            # label_tensor = label_tensor.transpose(0, 1).transpose(0, 2).contiguous()
+            # # label_tensor = label_tensor.view(label.size[1], label.size[0])
+            # pics.append(label_tensor.long())
         return tuple(pics)
 
 

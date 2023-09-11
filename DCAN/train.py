@@ -16,18 +16,21 @@ import logging
 from models.deeplab import DCAN
 from options import Options
 from dataloader import DataFolder
-
+from my_transforms import get_transforms
+import warnings
 import utils
 import argparse
 
+warnings.filterwarnings('ignore')
 parser = argparse.ArgumentParser(description="Train DCAN Model")
 parser.add_argument('--batch_size', type=int, default=4, help='input batch size for training')
-parser.add_argument('--num_workers', type=int, default=2, help='number of workers to load images')
+parser.add_argument('--num_workers', type=int, default=4, help='number of workers to load images')
 parser.add_argument('--lr', type=float, default=1e-3, help='learning rate')
 parser.add_argument('--weight_decay', type=float, default=1e-4, help='weight decay')
 parser.add_argument('--checkpoint', type=str, default=None, help='start from checkpoint')
-parser.add_argument('--checkpoint_freq', type=int, default=10, help='epoch to save checkpoints')
-parser.add_argument('--epochs', type=int, default=400, help='number of epochs to train')
+parser.add_argument('--checkpoint_freq', type=int, default=50, help='epoch to save checkpoints')
+parser.add_argument('--val_freq', type=int, default=10, help='epoch to validate')
+parser.add_argument('--epochs', type=int, default=300, help='number of epochs to train')
 parser.add_argument('--save_dir', type=str, default='./experiments/')
 parser.add_argument('--dataset', type=str, choices=['GlaS', 'CRAG'], default='GlaS', help='which dataset be used')
 parser.add_argument('--gpu', type=list, default=[3,], help='GPUs for training')
@@ -60,6 +63,20 @@ def main():
     # ----- define criterion ----- #
     criterion = nn.CrossEntropyLoss()
 
+    # ----- define augmentation ----- #
+    data_transforms = {
+        'train': get_transforms({
+        'horizontal_flip': True,
+        #'random_affine': 0.3,
+        #'random_elastic': [6, 15],
+        'random_rotation': 90,
+        #'random_crop': 480,
+        'to_tensor': 1,
+    }),
+        'val': get_transforms({
+        'to_tensor': 1,
+    })}
+
     # ----- load data ----- #
     dsets = {}
     for x in ['train', 'val']:
@@ -68,7 +85,7 @@ def main():
         dir_list = [img_dir, target_dir]
         # post_fix = ['weight.png', 'label.png']
 
-        dsets[x] = DataFolder(dir_list)
+        dsets[x] = DataFolder(dir_list, data_transform=data_transforms[x])
     train_loader = DataLoader(dsets['train'], batch_size=args.batch_size, shuffle=True,
                               num_workers=args.num_workers)
     val_loader = DataLoader(dsets['val'], batch_size=1, shuffle=False,
@@ -92,6 +109,7 @@ def main():
     # ----- 如果从epoch 0开始迭代，加载预训练权重 ----- #
     if start_epoch == 0:
         model.load_state_dict(torch.load("DCAN_pretrained_weight.pth"), strict=False)
+        logger.info("=> Loaded pretrained model weight!")
 
     # ----- training and validation ----- #
     for epoch in range(start_epoch, args.epochs):
@@ -100,18 +118,20 @@ def main():
         train_results = train(train_loader, model, optimizer, criterion, epoch)
         train_loss, train_loss_ce, train_loss_var, train_pixel_acc, train_iou = train_results
 
-        # evaluate on validation set
-        with torch.no_grad():
-            val_loss, val_pixel_acc, val_iou = validate(val_loader, model, criterion)
+        if (epoch+1) % args.val_freq == 0:
+            # evaluate on validation set
+            with torch.no_grad():
+                val_loss, val_pixel_acc, val_iou = validate(val_loader, model, criterion)
 
-        # check if it is the best accuracy
-        is_best = val_iou > best_iou
-        best_iou = max(val_iou, best_iou)
+            # check if it is the best accuracy
+            is_best = val_iou > best_iou
+            best_iou = max(val_iou, best_iou)
 
         cp_flag = (epoch+1) % args.checkpoint_freq == 0
         scheduler.step()
         if epoch != 0 and (epoch + 1) % 100 == 0:
             args.discount_weight = 0.1 * args.discount_weight
+            logger.info("=> discount weight degrade to {:.6f} ".format(args.discount_weight))
 
         if cp_flag:
             save_dir = "%s/%s/%d/" % (args.save_dir, args.dataset, epoch + 1)
@@ -124,10 +144,11 @@ def main():
                 'optimizer' : optimizer.state_dict(),
             }, epoch, is_best, save_dir, cp_flag)
 
-        # save the training results to txt files
-        logger_results.info('{:d}\t{:.4f}\t{:.4f}\t{:.4f}\t{:.4f}\t{:.4f}\t{:.4f}\t{:.4f}\t{:.4f}'
-                            .format(epoch+1, train_loss, train_loss_ce, train_loss_var, train_pixel_acc,
-                                    train_iou, val_loss, val_pixel_acc, val_iou))
+        if (epoch+1) % args.val_freq == 0:
+            # save the training results to txt files
+            logger_results.info('{:d}\t{:.4f}\t{:.4f}\t{:.4f}\t{:.4f}\t{:.4f}\t{:.4f}\t{:.4f}\t{:.4f}'
+                                .format(epoch+1, train_loss, train_loss_ce, train_loss_var, train_pixel_acc,
+                                        train_iou, val_loss, val_pixel_acc, val_iou))
 
 
 def train(train_loader, model, optimizer, criterion, epoch):

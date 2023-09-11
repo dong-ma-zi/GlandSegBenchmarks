@@ -107,8 +107,18 @@ class DataFolder(data.Dataset):
         # if self.data_transform is not None:
         #     sample = self.data_transform(sample)
 
-        img = self.data_transform(img)
-        return img, label, label_contour
+        # img = self.data_transform(img)
+        #cv2.imwrite('test_contour_before.jpg', label_contour * 255)
+        if self.data_transform is not None:
+            sample = self.data_transform([Image.fromarray(img), Image.fromarray(label), Image.fromarray(label_contour)])
+        # test_img = np.array(sample[0] * 255, np.uint8)
+        # test_img = np.transpose(test_img, (1, 2, 0))
+        # cv2.imwrite('test_img.jpg', test_img)
+        # test_label = np.array(sample[1].numpy()>0, np.uint8).reshape(480, 480, 1) * 255
+        # cv2.imwrite('test_label.jpg', test_label)
+        # test_contour = np.array(sample[2].numpy()>0, np.uint8).reshape(480, 480, 1) * 255
+        # cv2.imwrite('test_contour.jpg', test_contour)
+        return sample[0], sample[1], sample[2]
 
     def __len__(self):
         return len(self.img_list)

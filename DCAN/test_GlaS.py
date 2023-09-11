@@ -6,7 +6,7 @@ import numpy as np
 from PIL import Image
 import skimage.morphology as morph
 from skimage import measure, io
-from DCAN.models.fcn import DCAN
+from models.deeplab import DCAN
 import utils
 from metrics import ObjectHausdorff, ObjectDice, ObjectF1score
 # from vis import draw_overlay_rand
@@ -20,10 +20,10 @@ parser.add_argument('--weight_decay', type=float, default=1e-4, help='weight dec
 parser.add_argument('--checkpoint', type=str, default=None, help='start from checkpoint')
 parser.add_argument('--checkpoint_freq', type=int, default=10, help='epoch to save checkpoints')
 parser.add_argument('--epochs', type=int, default=100, help='number of epochs to train')
-parser.add_argument('--save_dir', type=str, default='./experiments/')
+parser.add_argument('--save_dir', type=str, default='./experiments')
 parser.add_argument('--img_dir', type=str, default='/home/data2/MedImg/GlandSeg/GlaS/test/Images')
 parser.add_argument('--label_dir', type=str, default='/home/data2/MedImg/GlandSeg/GlaS/test/Annotation')
-parser.add_argument('--model_path', type=str, default='/home/data1/wzh/code/GlandSegBenchmarks/DCAN/experiments/GlaS/200/checkpoints/checkpoint_200.pth.tar')
+parser.add_argument('--model_path', type=str, default='/home/data1/wzh/code/GlandSegBenchmarks/DCAN/experiments/GlaS/300/checkpoints/checkpoint_300.pth.tar')
 parser.add_argument('--dataset', type=str, choices=['GlaS', 'CRAG'], default='GlaS', help='which dataset be used')
 parser.add_argument('--gpu', type=list, default=[3,], help='GPUs for training')
 
@@ -49,7 +49,7 @@ def main():
     test_transform = transforms.Compose([transforms.ToTensor()])
 
     # load model
-    model = DCAN(n_class=2)
+    model = DCAN(n_class=2, split='test')
 
     model = model.cuda()
     cudnn.benchmark = True
@@ -80,10 +80,17 @@ def main():
         strs = img_dir.split('/')
         prob_maps_folder = '{:s}/{:s}/'.format(args.save_dir, args.dataset, strs[-1])
         seg_folder = '{:s}/{:s}/{:s}_segmentation'.format(args.save_dir, args.dataset, strs[-1])
+
+        before_contour_folder = '{:s}/{:s}/contour-unaware'.format(args.save_dir, args.dataset)
+        seg_contour_folder = '{:s}/{:s}/contour'.format(args.save_dir, args.dataset)
         if not os.path.exists(prob_maps_folder):
             os.mkdir(prob_maps_folder)
         if not os.path.exists(seg_folder):
             os.mkdir(seg_folder)
+        if not os.path.exists(before_contour_folder):
+            os.mkdir(before_contour_folder)
+        if not os.path.exists(seg_contour_folder):
+            os.mkdir(seg_contour_folder)
 
     for img_name in img_names:
         # load test image
@@ -103,7 +110,7 @@ def main():
         input = test_transform(img).unsqueeze(0)
 
         print('\tComputing output probability maps...')
-        pred = get_predmaps(input, model)
+        pred, pred_o, pred_c = get_predmaps(input, model)
         # if tta:
         #     img_hf = img.transpose(Image.FLIP_LEFT_RIGHT)  # horizontal flip
         #     img_vf = img.transpose(Image.FLIP_TOP_BOTTOM)  # vertical flip
@@ -159,7 +166,7 @@ def main():
 
 
         pred_labeled = measure.label(pred2)   # connected component labeling
-        pred_labeled = morph.dilation(pred_labeled, footprint=morph.disk(args.radius))
+        # pred_labeled = morph.dilation(pred_labeled, footprint=morph.disk(args.radius))
 
         # res_folder = './res_ck'
         # filename = '{:s}/{:s}.png'.format(res_folder, name)
@@ -191,6 +198,12 @@ def main():
             # final_pred = Image.fromarray(pred_labeled.astype(np.uint16))
             final_pred = Image.fromarray(pred_labeled.astype(np.uint8) * 100)
             final_pred.save('{:s}/{:s}_seg.jpg'.format(seg_folder, name))
+
+            before_pred = Image.fromarray(pred_o.astype(np.uint8) * 255)
+            before_pred.save('{:s}/{:s}_seg.jpg'.format(before_contour_folder, name))
+
+            contour_pred = Image.fromarray(pred_c.astype(np.uint8) * 255)
+            contour_pred.save('{:s}/{:s}_seg.jpg'.format(seg_contour_folder, name))
 
             # save colored objects
             # blank = np.ones(shape=(ori_h, 5, 3)) * 255
@@ -266,9 +279,8 @@ def get_predmaps(input, model):
     prob_c_maps = F.softmax(c_output[0], dim=0).cpu().numpy()
     pred_o = np.argmax(prob_o_maps, axis=0)
     pred_c = np.argmax(prob_c_maps, axis=0)
-    pred = pred_o - pred_c
-    pred[pred < 0] = 0
-    return pred
+    pred = np.where(pred_o > 0.5, 1, 0) * np.where(pred_c < 0.5, 1, 0)
+    return pred, pred_o, pred_c
 
 
 def save_results(header, avg_results, all_results, filename, mode='w'):
