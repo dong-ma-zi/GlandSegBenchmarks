@@ -8,18 +8,18 @@
     <th colspan="3">GlaS_B</th>
   </tr>
   <tr>
-    <td>Obj-F1</td>
-    <td>Obj-Dice</td>
-    <td>Obj-HD</td>
-    <td>Obj-F1</td>
-    <td>Obj-Dice</td>
-    <td>Obj-HD</td>
-    <td>Obj-F1</td>
-    <td>Obj-Dice</td>
-    <td>Obj-HD</td>
-    <td>Obj-F1</td>
-    <td>Obj-Dice</td>
-    <td>Obj-HD</td>
+    <td>F1</td>
+    <td>Dice</td>
+    <td>HD</td>
+    <td>F1</td>
+    <td>Dice</td>
+    <td>HD</td>
+    <td>F1</td>
+    <td>Dice</td>
+    <td>HD</td>
+    <td>F1</td>
+    <td>Dice</td>
+    <td>HD</td>
   </tr>
 <tr>
     <td>DCAN(report)</td>
