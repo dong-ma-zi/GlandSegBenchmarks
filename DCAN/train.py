@@ -66,14 +66,15 @@ def main():
     # ----- define augmentation ----- #
     data_transforms = {
         'train': get_transforms({
+        #'random_crop': 480,
         'horizontal_flip': True,
         #'random_affine': 0.3,
-        #'random_elastic': [6, 15],
+        'random_elastic': [6, 15],
         'random_rotation': 90,
-        #'random_crop': 480,
         'to_tensor': 1,
     }),
         'val': get_transforms({
+        #'random_crop': 480,
         'to_tensor': 1,
     })}
 
@@ -82,6 +83,8 @@ def main():
     for x in ['train', 'val']:
         img_dir = '/home/data2/MedImg/GlandSeg/%s/wzh/train/480x480/Images/' % (args.dataset)
         target_dir = '/home/data2/MedImg/GlandSeg/%s/wzh/train/480x480/Annotation/' % (args.dataset)
+        #img_dir = '/home/data2/MedImg/GlandSeg/%s/train/Images' % (args.dataset)
+        #target_dir = '/home/data2/MedImg/GlandSeg/%s/train/Annotation' % (args.dataset)
         dir_list = [img_dir, target_dir]
         # post_fix = ['weight.png', 'label.png']
 

@@ -221,6 +221,7 @@ class RandomCrop(object):
 
         w, h = imgs[0].size
         th, tw = self.size
+
         x1 = random.randint(0, w - tw)
         y1 = random.randint(0, h - th)
 

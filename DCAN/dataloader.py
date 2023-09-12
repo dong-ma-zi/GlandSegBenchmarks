@@ -45,6 +45,7 @@ def get_imgs_list(dir_list):
     for img in img_filename_list[0]:
 
         item = [os.path.join(dir_list[0], img), os.path.join(dir_list[1], img)]
+        # item = [os.path.join(dir_list[0], img), os.path.join(dir_list[1], img.split('.')[0] + '_anno.bmp')]
 
         if len(item) == len(dir_list):
             img_list.append(tuple(item))
