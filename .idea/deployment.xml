@@ -1,50 +1,29 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <project version="4">
-  <component name="PublishConfigData" autoUpload="Always" serverName="my@218.192.172.56:41922 password (6)" remoteFilesAllowedToDisappearOnAutoupload="false">
+  <component name="PublishConfigData" autoUpload="Always" serverName="new4@3090" remoteFilesAllowedToDisappearOnAutoupload="false">
     <serverData>
-      <paths name="my@218.192.172.56:41922 password">
+      <paths name="new4@3090">
+        <serverdata>
+          <mappings>
+            <mapping deploy="/home/data1/wzh/code/GlandSegBenchmarks" local="$PROJECT_DIR$" web="/" />
+          </mappings>
+        </serverdata>
+      </paths>
+      <paths name="wzh@10.10.40.248:22 password">
         <serverdata>
           <mappings>
             <mapping local="$PROJECT_DIR$" web="/" />
           </mappings>
         </serverdata>
       </paths>
-      <paths name="my@218.192.172.56:41922 password (2)">
+      <paths name="wzh@202.38.209.225:22 password">
         <serverdata>
           <mappings>
             <mapping local="$PROJECT_DIR$" web="/" />
           </mappings>
         </serverdata>
       </paths>
-      <paths name="my@218.192.172.56:41922 password (3)">
-        <serverdata>
-          <mappings>
-            <mapping local="$PROJECT_DIR$" web="/" />
-          </mappings>
-        </serverdata>
-      </paths>
-      <paths name="my@218.192.172.56:41922 password (4)">
-        <serverdata>
-          <mappings>
-            <mapping local="$PROJECT_DIR$" web="/" />
-          </mappings>
-        </serverdata>
-      </paths>
-      <paths name="my@218.192.172.56:41922 password (5)">
-        <serverdata>
-          <mappings>
-            <mapping local="$PROJECT_DIR$" web="/" />
-          </mappings>
-        </serverdata>
-      </paths>
-      <paths name="my@218.192.172.56:41922 password (6)">
-        <serverdata>
-          <mappings>
-            <mapping deploy="/home/data1/my/Project/GlandSegBenchmark" local="$PROJECT_DIR$" />
-          </mappings>
-        </serverdata>
-      </paths>
-      <paths name="my@218.192.172.56:41922 password (7)">
+      <paths name="wzh@218.192.172.56:41922 password">
         <serverdata>
           <mappings>
             <mapping local="$PROJECT_DIR$" web="/" />
