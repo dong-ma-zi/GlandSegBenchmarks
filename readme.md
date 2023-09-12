@@ -1,17 +1,73 @@
 <table>
   <tr>
-    <th>Method</th>
-    <th colspan="3">Glas</th>
+    <th rowspan="2">Methods</th>
+    <th rowspan="2">Sup</th>
     <th colspan="3">CRAG</th>
+    <th colspan="3">GlaS</th>
+    <th colspan="3">GlaS-A</th>
+    <th colspan="3">GlaS_B</th>
   </tr>
   <tr>
-    <td>Method</td>
-    <td>Obj-Dice</td>
     <td>Obj-F1</td>
-    <td>Obj-HD</td>
     <td>Obj-Dice</td>
-    <td>Obj-F1</td>
     <td>Obj-HD</td>
+    <td>Obj-F1</td>
+    <td>Obj-Dice</td>
+    <td>Obj-HD</td>
+    <td>Obj-F1</td>
+    <td>Obj-Dice</td>
+    <td>Obj-HD</td>
+    <td>Obj-F1</td>
+    <td>Obj-Dice</td>
+    <td>Obj-HD</td>
+  </tr>
+<tr>
+    <td>DCAN(report)</td>
+    <td>FullSup</td>
+    <td> 0.736 </td>
+    <td> 0.794 </td>
+    <td> 218.76 </td>
+    <td></td>
+    <td></td>
+    <td></td>
+  </tr>
+
+<tr>
+    <td>DCAN</td>
+    <td>FullSup</td>
+    <td></td>
+    <td></td>
+    <td></td>
+    <td></td>
+    <td></td>
+    <td></td>
+  </tr>
+<tr>
+    <td>MILD-Net(report)</td>
+    <td>FullSup</td>
+    <td> 0.825 </td>
+    <td> 0.875 </td>
+    <td> 160.14 </td>
+    <td></td>
+    <td></td>
+    <td></td>
+    <td> 0.914 </td>
+    <td> 0.913 </td>
+    <td> 41.54 </td>
+    <td> 0.844 </td>
+    <td> 0.836 </td>
+    <td> 105.89 </td>
+  </tr>
+<tr>
+    <td>MILD-Net</td>
+    <td>FullSup</td>
+    <td></td>
+    <td></td>
+    <td></td>
+    <td></td>
+    <td></td>
+    <td></td>
+  </tr>
   </tr>
 </table>
 
