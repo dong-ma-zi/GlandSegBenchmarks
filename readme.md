@@ -35,12 +35,12 @@
 <tr>
     <td>DCAN</td>
     <td>FullSup</td>
-    <td></td>
-    <td></td>
-    <td></td>
-    <td></td>
-    <td></td>
-    <td></td>
+    <td>0.754</td>
+    <td>0.806</td>
+    <td>253.93</td>
+    <td>0.827</td>
+    <td>0.853</td>
+    <td>87.85</td>
   </tr>
 <tr>
     <td>MILD-Net(report)</td>
