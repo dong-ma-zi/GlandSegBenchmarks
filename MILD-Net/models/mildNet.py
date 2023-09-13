@@ -6,17 +6,22 @@ Since: 2023-9-11
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from aspp import ASPP
+from models.aspp import ASPP
+
+def upsample(image, in_channels, out_channels, scale_factor):
+    image_upsample = nn.Upsample(scale_factor=scale_factor, mode='bilinear', align_corners=True)(image)
+    #image_upsample = nn.Conv2d(in_channels, out_channels, kernel_size=1)(image_upsample)
+    return image_upsample
 
 def downsample(image, downsample):
     image_downsample = nn.Upsample(scale_factor=downsample, mode='bilinear', align_corners=True)(image)
     return image_downsample
 
 class Up(nn.Module):
-    def __init__(self, in_channels, out_channels, bilinear=True):
+    def __init__(self, in_channels, out_channels, scale_factor=2, bilinear=True):
         super(Up, self).__init__()
         if bilinear:
-            self.up = nn.Upsample(scale_factor=2, mode='bilinear', align_corners=True)
+            self.up = nn.Upsample(scale_factor=scale_factor, mode='bilinear', align_corners=True)
         else:
             self.up = nn.ConvTranspose2d(in_channels, in_channels // 2, kernel_size=2, stride=2)
         self.conv1 = nn.Conv2d(in_channels, out_channels, kernel_size=1)
@@ -156,6 +161,25 @@ class MILDNet(nn.Module):
             nn.Conv2d(64, 2, kernel_size=1, stride=1)
         )
 
+        ## deep supervision
+        self.auxilary_object_classifier = nn.Sequential(
+            nn.Conv2d(512, 64, kernel_size=3, stride=1, padding=1),
+            nn.ReLU(),
+            nn.Conv2d(64, 64, kernel_size=3, stride=1, padding=1),
+            nn.ReLU(),
+            nn.Dropout(0.5),
+            nn.Conv2d(64, 2, kernel_size=1, stride=1)
+        )
+
+        self.auxilary_contour_classifier = nn.Sequential(
+            nn.Conv2d(512, 64, kernel_size=3, stride=1, padding=1),
+            nn.ReLU(),
+            nn.Conv2d(64, 64, kernel_size=3, stride=1, padding=1),
+            nn.ReLU(),
+            nn.Dropout(0.5),
+            nn.Conv2d(64, 2, kernel_size=1, stride=1)
+        )
+
 
     def forward(self, x):
         _, _, height, width = x.size()
@@ -181,6 +205,7 @@ class MILDNet(nn.Module):
         h = self.res3(h)
         h = self.dilated_res1(h)
         h = self.dilated_res2(h)
+        z = h
         h = self.dilated_res3(h)
         h = self.dilated_res4(h)
 
@@ -197,16 +222,25 @@ class MILDNet(nn.Module):
         h = self.upsample3(z3, h)
         output_o = self.object_classifier(h)
         output_c = self.contour_classifier(h)
-        return output_o, output_c
+
+        ## deep supervision
+        a_output_o = upsample(z, 512, 512, 8)
+        a_output_o = self.auxilary_object_classifier(a_output_o)
+
+        a_output_c = upsample(z, 512, 512, 8)
+        a_output_c = self.auxilary_contour_classifier(a_output_c)
+
+        return output_o, a_output_o, output_c, a_output_c
 
 
 if __name__ == "__main__":
     # 按照MILD-Net论文输入为464x464
-    x = torch.rand((4, 3, 464, 464)).cuda()
+    x = torch.rand((4, 3, 480, 480)).cuda()
     model = MILDNet().cuda()
-    o_output, c_output = model(x)
-    print('Object output size: ', o_output.size())
-    print('Contour output size: ', c_output.size())
+    output_o, a_output_o, output_c, a_output_c = model(x)
+    print('Object output size: ', output_o.size())
+    print('Contour output size: ', output_c.size())
+    print('Auxilary object output size: ', a_output_o.size())
 
 
 
