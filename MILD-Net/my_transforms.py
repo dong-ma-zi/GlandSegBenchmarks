@@ -15,8 +15,10 @@ While others will change image and label simultaneously.
 Author: Hui Qu
 """
 
-
+from collections.abc import Sequence
 import torch
+from torch import Tensor
+import torchvision.transforms.functional as F
 import random
 from PIL import Image, ImageOps
 import numpy as np
@@ -24,7 +26,7 @@ import numbers
 import collections
 from skimage import morphology
 import SimpleITK as sitk
-
+from torchvision.transforms import GaussianBlur
 
 class Compose(object):
     """ Composes several transforms together.
@@ -251,9 +253,12 @@ class RandomHorizontalFlip(object):
         """
         pics = []
         if random.random() < 0.5:
-            for img in imgs:
-                pics.append(img.transpose(Image.FLIP_LEFT_RIGHT))
-            return tuple(pics)
+            #for img in imgs:
+            #    pics.append(img.transpose(Image.FLIP_LEFT_RIGHT))
+            img0 = imgs[0].transpose(Image.FLIP_LEFT_RIGHT)
+            img1 = imgs[1].transpose(Image.FLIP_LEFT_RIGHT)
+            img2 = imgs[2].transpose(Image.FLIP_LEFT_RIGHT)
+            return img0, img1, img2
         else:
             return imgs
 
@@ -270,9 +275,12 @@ class RandomVerticalFlip(object):
         """
         pics = []
         if random.random() < 0.5:
-            for img in imgs:
-                pics.append(img.transpose(Image.FLIP_TOP_BOTTOM))
-            return tuple(pics)
+            # for img in imgs:
+            #     pics.append(img.transpose(Image.FLIP_TOP_BOTTOM))
+            img0 = imgs[0].transpose(Image.FLIP_TOP_BOTTOM)
+            img1 = imgs[1].transpose(Image.FLIP_TOP_BOTTOM)
+            img2 = imgs[2].transpose(Image.FLIP_TOP_BOTTOM)
+            return img0, img1, img2
         else:
             return imgs
 
@@ -391,13 +399,95 @@ class RandomRotation(object):
         angle = self.get_params(self.degrees)
 
         pics = []
-        for img in imgs:
-            pics.append(img.rotate(angle, self.resample, self.expand, self.center))
+        #for img in imgs:
+        #    pics.append(img.rotate(angle, self.resample, self.expand, self.center))
+        img0 = imgs[0].rotate(angle, self.resample, self.expand, self.center)
+        img1 = imgs[1].rotate(angle, self.resample, self.expand, self.center)
+        img2 = imgs[2].rotate(angle, self.resample, self.expand, self.center)
 
         # process the binary label
         # pics[1] = pics[1].point(lambda p: p > 127.5 and 255)
 
-        return tuple(pics)
+        return img0, img1, img2
+
+
+class GaussianBlur(object):
+    """Blurs image with randomly chosen Gaussian blur.
+    If the image is torch Tensor, it is expected
+    to have [..., C, H, W] shape, where ... means an arbitrary number of leading dimensions.
+
+    Args:
+        kernel_size (int or sequence): Size of the Gaussian kernel.
+        sigma (float or tuple of float (min, max)): Standard deviation to be used for
+            creating kernel to perform blurring. If float, sigma is fixed. If it is tuple
+            of float (min, max), sigma is chosen uniformly at random to lie in the
+            given range.
+
+    Returns:
+        PIL Image or Tensor: Gaussian blurred version of the input image.
+
+    """
+
+    def __init__(self, kernel_size, sigma=(0.1, 2.0)):
+        super().__init__()
+        self.kernel_size = self._setup_size(kernel_size, "Kernel size should be a tuple/list of two integers")
+        for ks in self.kernel_size:
+            if ks <= 0 or ks % 2 == 0:
+                raise ValueError("Kernel size value should be an odd and positive number.")
+
+        if isinstance(sigma, numbers.Number):
+            if sigma <= 0:
+                raise ValueError("If sigma is a single number, it must be positive.")
+            sigma = (sigma, sigma)
+        elif isinstance(sigma, Sequence) and len(sigma) == 2:
+            if not 0.0 < sigma[0] <= sigma[1]:
+                raise ValueError("sigma values should be positive and of the form (min, max).")
+        else:
+            raise ValueError("sigma should be a single number or a list/tuple with length 2.")
+
+        self.sigma = sigma
+
+
+    def _setup_size(self, size, error_msg):
+        if isinstance(size, numbers.Number):
+            return int(size), int(size)
+
+        if isinstance(size, Sequence) and len(size) == 1:
+            return size[0], size[0]
+
+        if len(size) != 2:
+            raise ValueError(error_msg)
+
+        return size
+
+    @staticmethod
+    def get_params(sigma_min: float, sigma_max: float) -> float:
+        """Choose sigma for random gaussian blurring.
+
+        Args:
+            sigma_min (float): Minimum standard deviation that can be chosen for blurring kernel.
+            sigma_max (float): Maximum standard deviation that can be chosen for blurring kernel.
+
+        Returns:
+            float: Standard deviation to be passed to calculate kernel for gaussian blurring.
+        """
+        return torch.empty(1).uniform_(sigma_min, sigma_max).item()
+
+    def __call__(self, imgs):
+        """
+        Args:
+            img (PIL Image or Tensor): image to be blurred.
+
+        Returns:
+            PIL Image or Tensor: Gaussian blurred image
+        """
+        sigma = self.get_params(self.sigma[0], self.sigma[1])
+        img = F.gaussian_blur(imgs[0], self.kernel_size, [sigma, sigma])
+        return img, imgs[1], imgs[2]
+
+    def __repr__(self) -> str:
+        s = f"{self.__class__.__name__}(kernel_size={self.kernel_size}, sigma={self.sigma})"
+        return s
 
 
 class RandomResize(object):
@@ -523,6 +613,7 @@ selector = {
     'random_rotation': lambda x: RandomRotation(x),
     'random_elastic': lambda x: RandomElasticDeform(x[0], x[1]),
     'random_crop': lambda x: RandomCrop(x),
+    'gaussian_blur': lambda x: GaussianBlur(x[0], x[1]),
     'label_encoding': lambda x: LabelEncoding(x),
     'to_tensor': lambda x: ToTensor(x),
     'normalize': lambda x: Normalize(x[0], x[1])

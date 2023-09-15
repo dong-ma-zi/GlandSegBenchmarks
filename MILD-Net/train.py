@@ -21,7 +21,7 @@ import utils
 import argparse
 
 warnings.filterwarnings('ignore')
-parser = argparse.ArgumentParser(description="Train DCAN Model")
+parser = argparse.ArgumentParser(description="Train MILD-Net Model")
 parser.add_argument('--batch_size', type=int, default=4, help='input batch size for training')
 parser.add_argument('--num_workers', type=int, default=4, help='number of workers to load images')
 parser.add_argument('--lr', type=float, default=1e-4, help='learning rate')
@@ -63,8 +63,10 @@ def main():
         'train': get_transforms({
         #'random_crop': 480,
         'horizontal_flip': True,
+        'vertical_flip': True,
         #'random_affine': 0.3,
-        'random_elastic': [6, 15],
+        # 'gaussian_blur': [3, (0.1, 2.0)],
+        # 'random_elastic': [6, 15],
         'random_rotation': 90,
         'to_tensor': 1,
     }),

@@ -7,7 +7,6 @@ class ASPPConv(nn.Sequential):
     def __init__(self, in_channels, out_channels, dilation):
         modules = [
             nn.Conv2d(in_channels, out_channels, 3, padding=dilation, dilation=dilation, bias=False),
-            nn.BatchNorm2d(out_channels),
             nn.ReLU()
         ]
         super(ASPPConv, self).__init__(*modules)
@@ -18,7 +17,6 @@ class ASPPPooling(nn.Sequential):
         super(ASPPPooling, self).__init__(
             nn.AdaptiveAvgPool2d(1),
             nn.Conv2d(in_channels, out_channels, 1, bias=False),
-            nn.BatchNorm2d(out_channels),
             nn.ReLU())
 
     def forward(self, x):
@@ -30,32 +28,33 @@ class ASPPPooling(nn.Sequential):
 class ASPP(nn.Module):
     def __init__(self, in_channels, out_channels):
         super(ASPP, self).__init__()
-        # out_channels = 256
-        modules = []
-        modules.append(nn.Sequential(
-            nn.Conv2d(in_channels, out_channels, 1, bias=False),
-            nn.BatchNorm2d(out_channels),
-            nn.ReLU()))
-
-        modules.append(ASPPConv(in_channels, out_channels, 6))
-        modules.append(ASPPConv(in_channels, out_channels, 12))
-        modules.append(ASPPConv(in_channels, out_channels, 18))
-        modules.append(ASPPPooling(in_channels, out_channels))
-
-        self.convs = nn.ModuleList(modules)
-
-        self.project = nn.Sequential(
-            nn.Conv2d(5 * out_channels, out_channels, 1, bias=False),
-            nn.BatchNorm2d(out_channels),
+        self.mean = nn.AdaptiveAvgPool2d((1, 1))
+        self.initial_conv = nn.Sequential(
+            nn.Conv2d(in_channels, in_channels, 1, bias=False),
             nn.ReLU(),
-            nn.Dropout(0.5))
+            nn.Dropout(0.5)
+        )
+        self.atrous_blocks1 = nn.Conv2d(in_channels, out_channels, 3, padding=6, dilation=6)
+        self.atrous_blocks2 = nn.Conv2d(in_channels, out_channels, 3, padding=12, dilation=12)
+        self.atrous_blocks3 = nn.Conv2d(in_channels, out_channels, 3, padding=18, dilation=18)
+        self.atrous_blocks4 = nn.Conv2d(in_channels, out_channels, 1)
+
+        self.output_conv = nn.Sequential(
+            nn.Conv2d(out_channels * 4, out_channels, 1),
+            nn.ReLU())
+
 
     def forward(self, x):
-        res = []
-        for conv in self.convs:
-            res.append(conv(x))
-        res = torch.cat(res, dim=1)
-        return self.project(res)
+        size = x.shape[2:]
+        x = self.initial_conv(x)
+        h1 = self.atrous_blocks1(x)
+        h2 = self.atrous_blocks2(x)
+        h3 = self.atrous_blocks3(x)
+        h4 = self.mean(self.atrous_blocks4(x))
+        h4 = F.interpolate(h4, size, mode='bilinear', align_corners=False)
+
+        h = self.output_conv(torch.cat([h1, h2, h3, h4], dim=1))
+        return h
 
 
 if __name__ == "__main__":

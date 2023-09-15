@@ -62,9 +62,12 @@ class MILUnit(nn.Module):
         self.relu = nn.ReLU(True)
 
     def forward(self, x, img):
+        _, _, height, width = x.size()
+
         h_1 = self.conv1_2(self.relu1(self.conv1_1(x)))
 
         h_2 = downsample(img, self.downsample)
+        h_2 = F.interpolate(h_2, size=(height, width), mode='bilinear',align_corners=True)
         h_2 = self.relu2(self.downsample_conv(h_2))
 
         h_2 = torch.cat([x, h_2], dim=1)
@@ -80,8 +83,10 @@ class ResidualUnit(nn.Module):
         self.relu1 = nn.ReLU(True)
         self.conv1_2 = nn.Conv2d(in_channels, in_channels, kernel_size=3, stride=1, padding=1)
 
+        self.relu = nn.ReLU(True)
+
     def forward(self, x):
-        return x + self.conv1_2(self.relu1(self.conv1_1(x)))
+        return self.relu(x + self.conv1_2(self.relu1(self.conv1_1(x))))
 
 
 class DilatedResidualUnit(nn.Module):
@@ -92,13 +97,16 @@ class DilatedResidualUnit(nn.Module):
         self.relu1 = nn.ReLU(True)
         self.conv1_2 = nn.Conv2d(in_channels, in_channels, kernel_size=3, stride=1, padding=dilation_rate, dilation=dilation_rate)
 
+        self.relu = nn.ReLU(True)
+
     def forward(self, x):
-        return x + self.conv1_2(self.relu1(self.conv1_1(x)))
+        return self.relu(x + self.conv1_2(self.relu1(self.conv1_1(x))))
 
 
 class MILDNet(nn.Module):
-    def __init__(self, n_class=2, init_weights=True):
+    def __init__(self, n_class=2, init_weights=True, split='train'):
         super(MILDNet, self).__init__()
+        self.split = split
 
         ## conv1 maxpooling
         self.conv1_1 = nn.Conv2d(3, 64, kernel_size=3, stride=1, padding=1)
@@ -179,6 +187,12 @@ class MILDNet(nn.Module):
             nn.Dropout(0.5),
             nn.Conv2d(64, 2, kernel_size=1, stride=1)
         )
+        self._initialize_weights()
+
+    def _initialize_weights(self):
+        for m in self.named_modules():
+            if isinstance(m, nn.Conv2d) or isinstance(m, nn.Linear):
+                nn.init.xavier_uniform_(m.weight)
 
 
     def forward(self, x):
@@ -229,6 +243,12 @@ class MILDNet(nn.Module):
 
         a_output_c = upsample(z, 512, 512, 8)
         a_output_c = self.auxilary_contour_classifier(a_output_c)
+
+        if self.split == 'test':
+            output_o = F.interpolate(output_o, size=(height, width), mode='bilinear',
+                                               align_corners=True)
+            output_c = F.interpolate(output_c, size=(height, width), mode='bilinear',
+                                               align_corners=True)
 
         return output_o, a_output_o, output_c, a_output_c
 
