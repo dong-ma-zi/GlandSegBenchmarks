@@ -4,6 +4,7 @@ Since: 2023-9-19
 """
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import torch.optim
 import torch.backends.cudnn as cudnn
 from torch.utils.data import DataLoader
@@ -14,6 +15,7 @@ import numpy as np
 import logging
 from models.ics import EfficientNet
 from dataloader import DataFolder
+from loss import dice_loss, object_dice_losses
 from my_transforms import get_transforms
 import warnings
 import utils
@@ -21,16 +23,16 @@ import argparse
 
 warnings.filterwarnings('ignore')
 parser = argparse.ArgumentParser(description="Train DCAN Model")
-parser.add_argument('--batch_size', type=int, default=12, help='input batch size for training (Glas:4, CRAG:12)')
+parser.add_argument('--batch_size', type=int, default=4, help='input batch size for training (Glas:4, CRAG:12)')
 parser.add_argument('--num_workers', type=int, default=4, help='number of workers to load images')
 parser.add_argument('--lr', type=float, default=1e-3, help='learning rate')
 parser.add_argument('--weight_decay', type=float, default=1e-4, help='weight decay')
 parser.add_argument('--checkpoint', type=str, default=None, help='start from checkpoint')
 parser.add_argument('--checkpoint_freq', type=int, default=50, help='epoch to save checkpoints')
 parser.add_argument('--val_freq', type=int, default=10, help='epoch to validate')
-parser.add_argument('--epochs', type=int, default=300, help='number of epochs to train')
+parser.add_argument('--epochs', type=int, default=150, help='number of epochs to train')
 parser.add_argument('--save_dir', type=str, default='./experiments/')
-parser.add_argument('--dataset', type=str, choices=['GlaS', 'CRAG'], default='CRAG', help='which dataset be used')
+parser.add_argument('--dataset', type=str, choices=['GlaS', 'CRAG'], default='GlaS', help='which dataset be used')
 parser.add_argument('--gpu', type=list, default=[3,], help='GPUs for training')
 parser.add_argument('--discount_weight', type=float, default=1, help='discount weight')
 args = parser.parse_args()
@@ -42,7 +44,7 @@ def main():
     os.environ['CUDA_VISIBLE_DEVICES'] = ','.join(str(x) for x in args.gpu)
 
     # set up logger
-    logger, logger_results = setup_logging(opt)
+    logger, logger_results = setup_logging()
 
     # ----- create model ----- #
     model = EfficientNet(compound_coef=1)
@@ -52,7 +54,7 @@ def main():
     # ----- define optimizer and lr_scheduler----- #
     optimizer = torch.optim.Adam(model.parameters(), args.lr, betas=(0.9, 0.99),
                                  weight_decay=args.weight_decay)
-    scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[100, 200, 300], gamma=0.1)
+    scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[50, 100, 150], gamma=0.1)
 
     # ----- define criterion ----- #
     criterion = nn.CrossEntropyLoss()
@@ -60,14 +62,9 @@ def main():
     # ----- define augmentation ----- #
     data_transforms = {
         'train': get_transforms({
-        #'random_crop': 480,
-        'horizontal_flip': True,
-        #'random_elastic': [6, 15],
-        'random_rotation': 90,
         'to_tensor': 1,
     }),
         'val': get_transforms({
-        #'random_crop': 480,
         'to_tensor': 1,
     })}
 
@@ -102,10 +99,6 @@ def main():
         else:
             logger.info("=> no checkpoint found at '{}'".format(args.checkpoint))
 
-    # ----- 如果从epoch 0开始迭代，加载预训练权重 ----- #
-    if start_epoch == 0:
-        model.load_state_dict(torch.load("DCAN_pretrained_weight.pth"), strict=False)
-        logger.info("=> Loaded pretrained model weight!")
 
     # ----- training and validation ----- #
     for epoch in range(start_epoch, args.epochs):
@@ -155,28 +148,32 @@ def train(train_loader, model, optimizer, criterion, epoch):
     model.train()
 
     for i, sample in enumerate(train_loader):
-        img, inst_label, label_contour = sample
+        img, label = sample
 
-        label = torch.gt(inst_label, 0).int().type(torch.LongTensor)
+        seg_label = torch.gt(label, 0).int().type(torch.LongTensor)
         img = img.cuda()
         label = label.cuda()
-        label_contour = label_contour.int().type(torch.LongTensor).cuda()
+        seg_label = seg_label.cuda()
 
         # compute output
         output, feature_maps = model(img)
 
-        # compute loss
-        loss_object = criterion(output, label)
+        # compute ce loss
+        loss_ce = criterion(output, seg_label)
 
-        loss_o = loss_object
-        loss = loss_o
+        # compute dice loss
+        score = F.softmax(output, dim=1)
+        loss_dice = dice_loss(seg_label, score[:, 1, :, :])
+
+        # compute object-level dice loss
+        loss_obj_dice = object_dice_losses(label, score[:, 1, :, :])
+
+        loss = loss_ce + loss_dice + loss_obj_dice
 
         # measure accuracy and record loss
         pred = np.argmax(output.data.cpu().numpy(), axis=1)
         metrics = utils.accuracy_pixel_level(pred, label.detach().cpu().numpy())
         pixel_accu, iou = metrics[0], metrics[1]
-
-        result = [loss.item(), loss_o.item(), pixel_accu, iou]
 
         # compute gradient and do SGD step
         optimizer.zero_grad()
@@ -186,14 +183,22 @@ def train(train_loader, model, optimizer, criterion, epoch):
         if i % args.val_freq == 0:
             logger.info('\tIteration: [{:d}/{:d}]'
                         '\tLoss {r[0]:.4f}'
-                        '\tLoss_Object {r[1]:.4f}'
-                        '\tPixel_Accu {r[2]:.4f}'
-                        '\tIoU {r[3]:.4f}'.format(i, len(train_loader), r=[loss.item(), loss_o.item(), pixel_accu, iou]))
+                        '\tLoss_CE {r[1]:.4f}'
+                        '\tLoss_Dice {r[2]:.4f}'
+                        '\tLoss_ObjDice {r[3]:.4f}'
+                        '\tPixel_Accu {r[4]:.4f}'
+                        '\tIoU {r[5]:.4f}'.format(i, len(train_loader), r=[loss.item(), loss_ce.item(),
+                                                                           loss_dice.item(), loss_obj_dice.item(),
+                                                                           pixel_accu, iou]))
 
     logger.info('\t=> Train Avg: Loss {r[0]:.4f}'
                 '\tLoss_Object {r[1]:.4f}'
-                '\tPixel_Accu {r[2]:.4f}'
-                '\tIoU {r[3]:.4f}'.format(epoch, args.epochs, r=[loss.item(), loss_o.item(), pixel_accu, iou]))
+                '\tLoss_Dice {r[2]:.4f}'
+                '\tLoss_ObjDice {r[3]:.4f}'
+                '\tPixel_Accu {r[4]:.4f}'
+                '\tIoU {r[5]:.4f}'.format(epoch, args.epochs, r=[loss.item(), loss_ce.item(),
+                                                                 loss_dice.item(), loss_obj_dice.item(),
+                                                                 pixel_accu, iou]))
 
     return results.avg
 
@@ -206,20 +211,26 @@ def validate(val_loader, model, criterion):
     model.eval()
 
     for i, sample in enumerate(val_loader):
-        img, inst_label, label_contour = sample
-        label = torch.gt(inst_label, 0).int().type(torch.LongTensor)
+        img, label = sample
+        seg_label = torch.gt(label, 0).int().type(torch.LongTensor)
         img = img.cuda()
         label = label.cuda()
-        label_contour = label_contour.int().type(torch.LongTensor).cuda()
+        seg_label = seg_label.cuda()
 
         # compute output
         output, feature_maps = model(img)
 
-        # compute loss
-        loss_object = criterion(output, label)
+        # compute ce loss
+        loss_ce = criterion(output, seg_label)
 
-        loss_o = loss_object
-        loss = loss_o
+        # compute dice loss
+        score = F.softmax(output[:, 1, :, :], dim=1)
+        loss_dice = dice_loss(seg_label, score)
+
+        # compute object-level dice loss
+        loss_obj_dice = object_dice_losses(label, score)
+
+        loss = loss_ce + loss_dice + loss_obj_dice
 
         # measure accuracy and record loss
         pred = np.argmax(output.cpu().numpy(), axis=1)
@@ -252,7 +263,7 @@ def setup_logging():
 
     save_dir = "%s/%s/" % (args.save_dir, args.dataset)
     if not os.path.exists(save_dir):
-        os.mkdir(save_dir)
+        os.makedirs(save_dir)
 
     # create logger for training information
     logger = logging.getLogger('train_logger')

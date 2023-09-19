@@ -3,13 +3,13 @@ import torch
 import torch.nn.functional as F
 from torchvision.ops.boxes import nms as nms_torch
 
-from efficientnet import EfficientNet as EffNet
-from utils import MemoryEfficientSwish, Swish
-from bifpn import SeparableConvBlock, BiFPN
-from utils_extra import Conv2dStaticSamePadding, MaxPool2dStaticSamePadding
+from models.efficientnet import EfficientNet as EffNet
+from models.utils import MemoryEfficientSwish, Swish
+from models.bifpn import SeparableConvBlock, BiFPN
+from models.utils_extra import Conv2dStaticSamePadding, MaxPool2dStaticSamePadding
 
-pretrained_path = {'efficientnet-b1' : 'adv-efficientnet-b1-0f3ce85a.pth',
-                   'efficientnet-b5' : 'adv-efficientnet-b5-86493f6b.pth'}
+pretrained_path = {'efficientnet-b1' : './models/adv-efficientnet-b1-0f3ce85a.pth',
+                   'efficientnet-b5' : './models/adv-efficientnet-b5-86493f6b.pth'}
 
 def nms(dets, thresh):
     return nms_torch(dets[:, :4], dets[:, 4], thresh)
