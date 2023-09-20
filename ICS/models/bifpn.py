@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
-from utils import MemoryEfficientSwish, Swish
-from utils_extra import Conv2dStaticSamePadding, MaxPool2dStaticSamePadding
+from models.utils import MemoryEfficientSwish, Swish
+from models.utils_extra import Conv2dStaticSamePadding, MaxPool2dStaticSamePadding
 
 
 class SeparableConvBlock(nn.Module):

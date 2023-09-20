@@ -16,17 +16,24 @@ def dice_loss(true, pred, smooth=1e-3):
 def overlap(true, pred):
     return np.sum(np.where(true>0, 1, 0) * np.where(pred>0, 1, 0))
 
+def object_dice_losses(trues, preds):
+    loss = torch.tensor(0.).cuda()
+    for i in range(trues.size(0)):
+        loss += object_dice_loss(trues[i], preds[i])
+    return loss
 
 def object_dice_loss(true, pred_ori):
-    loss = 0
-
-    pred = torch.gt(pred_ori, 0.5)
+    pred = torch.gt(pred_ori, 0.5).int()
 
     predMatchMap = {}
     trueMatchMap = {}
-    true_inst = np.array(true)
+    true_inst = np.array(true.detach().cpu().numpy())
+    pred = pred.detach().cpu()
     pred_inst = measure.label(pred)
     pred_props = measure.regionprops(pred_inst)
+    ## 如果没有预测的腺体实例，直接返回loss
+    if len(pred_props) == 0 or np.max(true_inst) == 0:
+        return torch.tensor(1.0).cuda()
     true_props = measure.regionprops(true_inst)
     for i, pred_prop in enumerate(pred_props):
         max_overlap = -float('inf')
@@ -48,22 +55,23 @@ def object_dice_loss(true, pred_ori):
                 trueMatchMap[i] = j
                 max_overlap = temp
 
-    pred_loss = 0
-    pred_all_slice = torch.gt(pred, 0)
+    pred_loss = torch.tensor(0.).cuda()
+    pred = pred.cuda()
     for i, pred_prop in enumerate(pred_props):
-        pred_map = torch.from_numpy(np.array(pred_inst == pred_prop.label, np.uint8))
-        true_map = torch.from_numpy(np.array(true_inst == true_props[predMatchMap[i]].label, np.uint8))
+        pred_map = torch.from_numpy(np.array(pred_inst == pred_prop.label, np.uint8)).cuda()
+        true_map = torch.from_numpy(np.array(true_inst == true_props[predMatchMap[i]].label, np.uint8)).cuda()
         pred_slice = pred_ori * (pred == pred_map)
-        pred_loss += dice_loss(true_map, pred_slice) * torch.sum(pred_slice) / torch.sum(pred_all_slice)
+        pred_loss += dice_loss(true_map, pred_slice) * torch.sum(pred_map) / torch.sum(pred)
 
-    true_loss = 0
-    true_all_slice = torch.gt(pred, 0)
+    true_loss = torch.tensor(0.).cuda()
+    true_all_slice = torch.gt(true, 0)
     for i, true_prop in enumerate(true_props):
-        true_map = torch.from_numpy(np.array(true_inst == true_prop.label, np.uint8))
-        pred_map = torch.from_numpy(np.array(pred_inst == pred_props[trueMatchMap[i]].label, np.uint8))
-        true_slice = true == true_map
+        true_map = torch.from_numpy(np.array(true_inst == true_prop.label, np.uint8)).cuda()
+        pred_map = torch.from_numpy(np.array(pred_inst == pred_props[trueMatchMap[i]].label, np.uint8)).cuda()
+        true_slice = (true == true_prop.label).float()
         pred_slice = pred_ori * (pred == pred_map)
-        true_loss += dice_loss(true_slice, pred_slice) * torch.sum(true_slice) / torch.sum(true_all_slice)
+        true_loss += dice_loss(true_slice, pred_slice) * torch.sum(true_map) / torch.sum(true_all_slice)
+    del true_map, pred_map, pred_slice, true_slice
     return (pred_loss + true_loss) / 2
 
 
