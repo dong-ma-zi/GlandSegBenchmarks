@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from models.utils import MemoryEfficientSwish, Swish
 from models.utils_extra import Conv2dStaticSamePadding, MaxPool2dStaticSamePadding
 
@@ -204,25 +205,29 @@ class BiFPN(nn.Module):
         p6_w1 = self.p6_w1_relu(self.p6_w1)
         weight = p6_w1 / (torch.sum(p6_w1, dim=0) + self.epsilon)
         # Connections for P6_0 and P7_0 to P6_1 respectively
-        p6_up = self.conv6_up(self.swish(weight[0] * p6_in + weight[1] * self.p6_upsample(p7_in)))
+        _, _, h, w = p6_in.size()
+        p6_up = self.conv6_up(self.swish(weight[0] * p6_in + weight[1] * F.interpolate(self.p6_upsample(p7_in), size=(h, w), mode='bilinear', align_corners=True)))
 
         # Weights for P5_0 and P6_1 to P5_1
         p5_w1 = self.p5_w1_relu(self.p5_w1)
         weight = p5_w1 / (torch.sum(p5_w1, dim=0) + self.epsilon)
         # Connections for P5_0 and P6_1 to P5_1 respectively
-        p5_up = self.conv5_up(self.swish(weight[0] * p5_in + weight[1] * self.p5_upsample(p6_up)))
+        _, _, h, w = p5_in.size()
+        p5_up = self.conv5_up(self.swish(weight[0] * p5_in + weight[1] * F.interpolate(self.p5_upsample(p6_up), size=(h, w), mode='bilinear', align_corners=True)))
 
         # Weights for P4_0 and P5_1 to P4_1
         p4_w1 = self.p4_w1_relu(self.p4_w1)
         weight = p4_w1 / (torch.sum(p4_w1, dim=0) + self.epsilon)
         # Connections for P4_0 and P5_1 to P4_1 respectively
-        p4_up = self.conv4_up(self.swish(weight[0] * p4_in + weight[1] * self.p4_upsample(p5_up)))
+        _, _, h, w = p4_in.size()
+        p4_up = self.conv4_up(self.swish(weight[0] * p4_in + weight[1] * F.interpolate(self.p4_upsample(p5_up), size=(h, w), mode='bilinear', align_corners=True)))
 
         # Weights for P3_0 and P4_1 to P3_2
         p3_w1 = self.p3_w1_relu(self.p3_w1)
         weight = p3_w1 / (torch.sum(p3_w1, dim=0) + self.epsilon)
         # Connections for P3_0 and P4_1 to P3_2 respectively
-        p3_out = self.conv3_up(self.swish(weight[0] * p3_in + weight[1] * self.p3_upsample(p4_up)))
+        _, _, h, w = p3_in.size()
+        p3_out = self.conv3_up(self.swish(weight[0] * p3_in + weight[1] * F.interpolate(self.p3_upsample(p4_up), size=(h, w), mode='bilinear', align_corners=True)))
 
         if self.first_time:
             p4_in = self.p4_down_channel_2(p4)
@@ -232,28 +237,32 @@ class BiFPN(nn.Module):
         p4_w2 = self.p4_w2_relu(self.p4_w2)
         weight = p4_w2 / (torch.sum(p4_w2, dim=0) + self.epsilon)
         # Connections for P4_0, P4_1 and P3_2 to P4_2 respectively
+        _, _, h, w = p4_in.size()
         p4_out = self.conv4_down(
-            self.swish(weight[0] * p4_in + weight[1] * p4_up + weight[2] * self.p4_downsample(p3_out)))
+            self.swish(weight[0] * p4_in + weight[1] * p4_up + weight[2] * F.interpolate(self.p4_downsample(p3_out), size=(h, w), mode='bilinear', align_corners=True)))
 
         # Weights for P5_0, P5_1 and P4_2 to P5_2
         p5_w2 = self.p5_w2_relu(self.p5_w2)
         weight = p5_w2 / (torch.sum(p5_w2, dim=0) + self.epsilon)
         # Connections for P5_0, P5_1 and P4_2 to P5_2 respectively
+        _, _, h, w = p5_in.size()
         p5_out = self.conv5_down(
-            self.swish(weight[0] * p5_in + weight[1] * p5_up + weight[2] * self.p5_downsample(p4_out)))
+            self.swish(weight[0] * p5_in + weight[1] * p5_up + weight[2] * F.interpolate(self.p5_downsample(p4_out), size=(h, w), mode='bilinear', align_corners=True)))
 
         # Weights for P6_0, P6_1 and P5_2 to P6_2
         p6_w2 = self.p6_w2_relu(self.p6_w2)
         weight = p6_w2 / (torch.sum(p6_w2, dim=0) + self.epsilon)
         # Connections for P6_0, P6_1 and P5_2 to P6_2 respectively
+        _, _, h, w = p6_in.size()
         p6_out = self.conv6_down(
-            self.swish(weight[0] * p6_in + weight[1] * p6_up + weight[2] * self.p6_downsample(p5_out)))
+            self.swish(weight[0] * p6_in + weight[1] * p6_up + weight[2] * F.interpolate(self.p6_downsample(p5_out), size=(h, w), mode='bilinear', align_corners=True)))
 
         # Weights for P7_0 and P6_2 to P7_2
         p7_w2 = self.p7_w2_relu(self.p7_w2)
         weight = p7_w2 / (torch.sum(p7_w2, dim=0) + self.epsilon)
         # Connections for P7_0 and P6_2 to P7_2
-        p7_out = self.conv7_down(self.swish(weight[0] * p7_in + weight[1] * self.p7_downsample(p6_out)))
+        _, _, h, w = p7_in.size()
+        p7_out = self.conv7_down(self.swish(weight[0] * p7_in + weight[1] * F.interpolate(self.p7_downsample(p6_out), size=(h, w), mode='bilinear', align_corners=True)))
 
         return p3_out, p4_out, p5_out, p6_out, p7_out
 

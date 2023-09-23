@@ -2,6 +2,7 @@ import torch
 from skimage import measure
 import numpy as np
 from PIL import Image
+import skimage.morphology as morph
 
 ####
 def dice_loss(true, pred, smooth=1e-3):
@@ -14,7 +15,8 @@ def dice_loss(true, pred, smooth=1e-3):
     return loss
 
 def overlap(true, pred):
-    return np.sum(np.where(true>0, 1, 0) * np.where(pred>0, 1, 0))
+    return np.sum(true * pred)
+    # return np.sum(np.where(true>0, 1, 0) * np.where(pred>0, 1, 0))
 
 def object_dice_losses(trues, preds):
     loss = torch.tensor(0.).cuda()
@@ -24,14 +26,15 @@ def object_dice_losses(trues, preds):
 
 def object_dice_loss(true, pred_ori):
     pred = torch.gt(pred_ori, 0.5).int()
+    pred = pred.detach().cpu().numpy()
 
     predMatchMap = {}
     trueMatchMap = {}
     true_inst = np.array(true.detach().cpu().numpy())
-    pred = pred.detach().cpu()
     pred_inst = measure.label(pred)
+    pred_inst = morph.remove_small_objects(pred_inst, 100)
     pred_props = measure.regionprops(pred_inst)
-    ## 如果没有预测的腺体实例，直接返回loss
+    ## 如果没有预测的腺体实例，直接返回loss 或者实例数量非常多，多于100
     if len(pred_props) == 0 or np.max(true_inst) == 0:
         return torch.tensor(1.0).cuda()
     true_props = measure.regionprops(true_inst)
@@ -56,7 +59,7 @@ def object_dice_loss(true, pred_ori):
                 max_overlap = temp
 
     pred_loss = torch.tensor(0.).cuda()
-    pred = pred.cuda()
+    pred = torch.from_numpy(pred).cuda()
     for i, pred_prop in enumerate(pred_props):
         pred_map = torch.from_numpy(np.array(pred_inst == pred_prop.label, np.uint8)).cuda()
         true_map = torch.from_numpy(np.array(true_inst == true_props[predMatchMap[i]].label, np.uint8)).cuda()

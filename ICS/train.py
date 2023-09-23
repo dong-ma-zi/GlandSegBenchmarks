@@ -25,7 +25,7 @@ warnings.filterwarnings('ignore')
 parser = argparse.ArgumentParser(description="Train DCAN Model")
 parser.add_argument('--batch_size', type=int, default=4, help='input batch size for training (Glas:4, CRAG:12)')
 parser.add_argument('--num_workers', type=int, default=4, help='number of workers to load images')
-parser.add_argument('--lr', type=float, default=1e-3, help='learning rate')
+parser.add_argument('--lr', type=float, default=5e-4, help='learning rate')
 parser.add_argument('--weight_decay', type=float, default=1e-4, help='weight decay')
 parser.add_argument('--checkpoint', type=str, default=None, help='start from checkpoint')
 parser.add_argument('--checkpoint_freq', type=int, default=50, help='epoch to save checkpoints')
@@ -34,7 +34,8 @@ parser.add_argument('--epochs', type=int, default=150, help='number of epochs to
 parser.add_argument('--save_dir', type=str, default='./experiments/')
 parser.add_argument('--dataset', type=str, choices=['GlaS', 'CRAG'], default='GlaS', help='which dataset be used')
 parser.add_argument('--gpu', type=list, default=[3,], help='GPUs for training')
-parser.add_argument('--discount_weight', type=float, default=1, help='discount weight')
+parser.add_argument('--gamma1', type=float, default=1, help='weight for dice loss')
+parser.add_argument('--gamma2', type=float, default=0.5, help='weight for object-level dice loss')
 args = parser.parse_args()
 
 def main():
@@ -62,6 +63,9 @@ def main():
     # ----- define augmentation ----- #
     data_transforms = {
         'train': get_transforms({
+        'horizontal_flip': True,
+        'vertical_flip': True,
+        'random_rotation': 90,
         'to_tensor': 1,
     }),
         'val': get_transforms({
@@ -105,7 +109,7 @@ def main():
         # train for one epoch or len(train_loader) iterations
         logger.info('Epoch: [{:d}/{:d}]'.format(epoch+1, args.epochs))
         train_results = train(train_loader, model, optimizer, criterion, epoch)
-        train_loss, train_loss_ce, train_loss_var, train_pixel_acc, train_iou = train_results
+        train_loss, train_loss_ce, train_loss_dice, train_loss_obj_dice, train_pixel_acc, train_iou = train_results
 
         if (epoch+1) % args.val_freq == 0:
             # evaluate on validation set
@@ -118,9 +122,6 @@ def main():
 
         cp_flag = (epoch+1) % args.checkpoint_freq == 0
         scheduler.step()
-        if epoch != 0 and (epoch + 1) % 100 == 0:
-            args.discount_weight = 0.1 * args.discount_weight
-            logger.info("=> discount weight degrade to {:.6f} ".format(args.discount_weight))
 
         if cp_flag:
             save_dir = "%s/%s/%d/" % (args.save_dir, args.dataset, epoch + 1)
@@ -136,13 +137,13 @@ def main():
         if (epoch+1) % args.val_freq == 0:
             # save the training results to txt files
             logger_results.info('{:d}\t{:.4f}\t{:.4f}\t{:.4f}\t{:.4f}\t{:.4f}\t{:.4f}\t{:.4f}\t{:.4f}'
-                                .format(epoch+1, train_loss, train_loss_ce, train_loss_var, train_pixel_acc,
+                                .format(epoch+1, train_loss, train_loss_ce, train_loss_dice, train_pixel_acc,
                                         train_iou, val_loss, val_pixel_acc, val_iou))
 
 
 def train(train_loader, model, optimizer, criterion, epoch):
     # list to store the average loss and iou for this epoch
-    results = utils.AverageMeter(5)
+    results = utils.AverageMeter(6)
 
     # switch to train mode
     model.train()
@@ -168,11 +169,11 @@ def train(train_loader, model, optimizer, criterion, epoch):
         # compute object-level dice loss
         loss_obj_dice = object_dice_losses(label, score[:, 1, :, :])
 
-        loss = loss_ce + loss_dice + loss_obj_dice
+        loss = loss_ce + args.gamma1 * loss_dice + args.gamma2 * loss_obj_dice
 
         # measure accuracy and record loss
         pred = np.argmax(output.data.cpu().numpy(), axis=1)
-        metrics = utils.accuracy_pixel_level(pred, label.detach().cpu().numpy())
+        metrics = utils.accuracy_pixel_level(pred, seg_label.detach().cpu().numpy())
         pixel_accu, iou = metrics[0], metrics[1]
 
         # compute gradient and do SGD step
@@ -180,25 +181,25 @@ def train(train_loader, model, optimizer, criterion, epoch):
         loss.backward()
         optimizer.step()
 
-        if i % args.val_freq == 0:
+        result = [loss.item(), loss_ce.item(), loss_dice.item(), loss_obj_dice.item(),
+                  pixel_accu, iou]
+        results.update(result, img.size(0))
+
+        if i % 50 == 0:
             logger.info('\tIteration: [{:d}/{:d}]'
                         '\tLoss {r[0]:.4f}'
                         '\tLoss_CE {r[1]:.4f}'
                         '\tLoss_Dice {r[2]:.4f}'
                         '\tLoss_ObjDice {r[3]:.4f}'
                         '\tPixel_Accu {r[4]:.4f}'
-                        '\tIoU {r[5]:.4f}'.format(i, len(train_loader), r=[loss.item(), loss_ce.item(),
-                                                                           loss_dice.item(), loss_obj_dice.item(),
-                                                                           pixel_accu, iou]))
+                        '\tIoU {r[5]:.4f}'.format(i, len(train_loader), r=results.avg))
 
     logger.info('\t=> Train Avg: Loss {r[0]:.4f}'
                 '\tLoss_Object {r[1]:.4f}'
                 '\tLoss_Dice {r[2]:.4f}'
                 '\tLoss_ObjDice {r[3]:.4f}'
                 '\tPixel_Accu {r[4]:.4f}'
-                '\tIoU {r[5]:.4f}'.format(epoch, args.epochs, r=[loss.item(), loss_ce.item(),
-                                                                 loss_dice.item(), loss_obj_dice.item(),
-                                                                 pixel_accu, iou]))
+                '\tIoU {r[5]:.4f}'.format(epoch, args.epochs, r=results.avg))
 
     return results.avg
 
@@ -224,17 +225,17 @@ def validate(val_loader, model, criterion):
         loss_ce = criterion(output, seg_label)
 
         # compute dice loss
-        score = F.softmax(output[:, 1, :, :], dim=1)
-        loss_dice = dice_loss(seg_label, score)
+        score = F.softmax(output, dim=1)
+        loss_dice = dice_loss(seg_label, score[:, 1, :, :])
 
         # compute object-level dice loss
-        loss_obj_dice = object_dice_losses(label, score)
+        loss_obj_dice = object_dice_losses(label, score[:, 1, :, :])
 
-        loss = loss_ce + loss_dice + loss_obj_dice
+        loss = loss_ce + args.gamma1 * loss_dice + args.gamma2 * loss_obj_dice
 
         # measure accuracy and record loss
         pred = np.argmax(output.cpu().numpy(), axis=1)
-        metrics = utils.accuracy_pixel_level(pred, label.detach().cpu().numpy())
+        metrics = utils.accuracy_pixel_level(pred, seg_label.detach().cpu().numpy())
         pixel_accu = metrics[0]
         iou = metrics[1]
 

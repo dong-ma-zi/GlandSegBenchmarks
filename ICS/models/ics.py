@@ -124,6 +124,12 @@ class EfficientNet(nn.Module):
             SeparableConvBlock(self.gamma, self.gamma)
         )
 
+        self.classifier = nn.Sequential(
+            nn.Conv2d(self.gamma, 2, kernel_size=3, stride=1, padding=1),
+            nn.ReLU(),
+            nn.Dropout(0.5)
+        )
+
         self.model = model
 
     def forward(self, x):
@@ -171,6 +177,7 @@ class EfficientNet(nn.Module):
         output = self.seperable_conv(feat)
         output = nn.Upsample(scale_factor=2, mode='bilinear', align_corners=True)(output)
         output = F.interpolate(output, size=(h, w), mode='bilinear', align_corners=True)
+        output = self.classifier(output)
         return output,feature_maps
 
 if __name__ == '__main__':
