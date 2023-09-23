@@ -391,8 +391,10 @@ class RandomRotation(object):
         angle = self.get_params(self.degrees)
 
         pics = []
-        for img in imgs:
-            pics.append(img.rotate(angle, self.resample, self.expand, self.center))
+        """ 源代码此处有bug， 所有图都用双线性插值， 实际对于label应该用最近邻插值 """
+        # for img in imgs:
+        pics.append(imgs[0].rotate(angle, self.resample, self.expand, self.center))
+        pics.append(imgs[1].rotate(angle, Image.NEAREST, self.expand, self.center))
 
         # process the binary label
         # pics[1] = pics[1].point(lambda p: p > 127.5 and 255)

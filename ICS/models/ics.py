@@ -126,8 +126,8 @@ class EfficientNet(nn.Module):
 
         self.classifier = nn.Sequential(
             nn.Conv2d(self.gamma, 2, kernel_size=3, stride=1, padding=1),
-            nn.ReLU(),
-            nn.Dropout(0.5)
+            nn.ReLU()
+            #nn.Dropout(0.5)
         )
 
         self.model = model

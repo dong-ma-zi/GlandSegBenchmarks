@@ -22,15 +22,15 @@ import utils
 import argparse
 
 warnings.filterwarnings('ignore')
-parser = argparse.ArgumentParser(description="Train DCAN Model")
+parser = argparse.ArgumentParser(description="Train I2CS Model")
 parser.add_argument('--batch_size', type=int, default=4, help='input batch size for training (Glas:4, CRAG:12)')
 parser.add_argument('--num_workers', type=int, default=4, help='number of workers to load images')
 parser.add_argument('--lr', type=float, default=5e-4, help='learning rate')
 parser.add_argument('--weight_decay', type=float, default=1e-4, help='weight decay')
 parser.add_argument('--checkpoint', type=str, default=None, help='start from checkpoint')
 parser.add_argument('--checkpoint_freq', type=int, default=50, help='epoch to save checkpoints')
-parser.add_argument('--val_freq', type=int, default=10, help='epoch to validate')
-parser.add_argument('--epochs', type=int, default=150, help='number of epochs to train')
+parser.add_argument('--val_freq', type=int, default=50, help='epoch to validate')
+parser.add_argument('--epochs', type=int, default=400, help='number of epochs to train')
 parser.add_argument('--save_dir', type=str, default='./experiments/')
 parser.add_argument('--dataset', type=str, choices=['GlaS', 'CRAG'], default='GlaS', help='which dataset be used')
 parser.add_argument('--gpu', type=list, default=[3,], help='GPUs for training')
@@ -55,7 +55,7 @@ def main():
     # ----- define optimizer and lr_scheduler----- #
     optimizer = torch.optim.Adam(model.parameters(), args.lr, betas=(0.9, 0.99),
                                  weight_decay=args.weight_decay)
-    scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[50, 100, 150], gamma=0.1)
+    scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[100, 250], gamma=0.1)
 
     # ----- define criterion ----- #
     criterion = nn.CrossEntropyLoss()
@@ -63,6 +63,7 @@ def main():
     # ----- define augmentation ----- #
     data_transforms = {
         'train': get_transforms({
+        'random_crop' : 416,
         'horizontal_flip': True,
         'vertical_flip': True,
         'random_rotation': 90,
@@ -75,10 +76,10 @@ def main():
     # ----- load data ----- #
     dsets = {}
     for x in ['train', 'val']:
-        img_dir = '/home/data2/MedImg/GlandSeg/%s/wzh/train/480x480/Images/' % (args.dataset)
-        target_dir = '/home/data2/MedImg/GlandSeg/%s/wzh/train/480x480/Annotation/' % (args.dataset)
-        #img_dir = '/home/data2/MedImg/GlandSeg/%s/train/Images' % (args.dataset)
-        #target_dir = '/home/data2/MedImg/GlandSeg/%s/train/Annotation' % (args.dataset)
+        # img_dir = '/home/data2/MedImg/GlandSeg/%s/wzh/train/480x480/Images/' % (args.dataset)
+        # target_dir = '/home/data2/MedImg/GlandSeg/%s/wzh/train/480x480/Annotation/' % (args.dataset)
+        img_dir = '/home/data2/MedImg/GlandSeg/%s/train/Images' % (args.dataset)
+        target_dir = '/home/data2/MedImg/GlandSeg/%s/train/Annotation' % (args.dataset)
         dir_list = [img_dir, target_dir]
         # post_fix = ['weight.png', 'label.png']
 

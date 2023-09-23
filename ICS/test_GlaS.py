@@ -22,7 +22,7 @@ parser.add_argument('--epochs', type=int, default=100, help='number of epochs to
 parser.add_argument('--save_dir', type=str, default='./experiments')
 parser.add_argument('--img_dir', type=str, default='/home/data2/MedImg/GlandSeg/GlaS/test/Images')
 parser.add_argument('--label_dir', type=str, default='/home/data2/MedImg/GlandSeg/GlaS/test/Annotation')
-parser.add_argument('--model_path', type=str, default='/home/data1/wzh/code/GlandSegBenchmarks/ICS/experiments/GlaS/150/checkpoints/checkpoint_150.pth.tar')
+parser.add_argument('--model_path', type=str, default='/home/data1/wzh/code/GlandSegBenchmarks/ICS/experiments/GlaS/400/checkpoints/checkpoint_400.pth.tar')
 parser.add_argument('--dataset', type=str, choices=['GlaS', 'CRAG'], default='GlaS', help='which dataset be used')
 parser.add_argument('--gpu', type=list, default=[2,], help='GPUs for training')
 
@@ -39,7 +39,7 @@ def main():
     save_dir = "%s/%s" % (args.save_dir, args.dataset)
     model_path = args.model_path
     save_flag = True
-    tta = False
+    tta = True
 
     # check if it is needed to compute accuracies
     eval_flag = True if label_dir else False
@@ -88,7 +88,7 @@ def main():
         # if 'B' in img_name: ## B 11 18 19
         #     continue
 
-        if img_name in ['testB_11.bmp', 'testB_19.bmp','testB_14.bmp']:
+        if img_name in ['testB_11.bmp', 'testB_19.bmp','testB_18.bmp', 'testB_14.bmp']:
             continue
 
         print('=> Processing image {:s}'.format(img_name))
@@ -118,18 +118,18 @@ def main():
             img_vf = img.transpose(Image.FLIP_TOP_BOTTOM)  # vertical flip
             img_hvf = img_hf.transpose(Image.FLIP_TOP_BOTTOM)  # horizontal and vertical flips
 
-            input_hf = test_transform(img_hf).unsqueeze(0)  # horizontal flip input
-            input_vf = test_transform(img_vf).unsqueeze(0)  # vertical flip input
-            input_hvf = test_transform(img_hvf).unsqueeze(0)  # horizontal and vertical flip input
+            input_hf = test_transform(img_hf).unsqueeze(0).cuda()  # horizontal flip input
+            input_vf = test_transform(img_vf).unsqueeze(0).cuda()  # vertical flip input
+            input_hvf = test_transform(img_hvf).unsqueeze(0).cuda()  # horizontal and vertical flip input
 
             prob_maps_hf = get_probmaps(input_hf, model)
             prob_maps_vf = get_probmaps(input_vf, model)
             prob_maps_hvf = get_probmaps(input_hvf, model)
 
             # re flip
-            prob_maps_hf = np.flip(prob_maps_hf, 2)
-            prob_maps_vf = np.flip(prob_maps_vf, 1)
-            prob_maps_hvf = np.flip(np.flip(prob_maps_hvf, 1), 2)
+            prob_maps_hf = np.flip(prob_maps_hf, 1)
+            prob_maps_vf = np.flip(prob_maps_vf, 0)
+            prob_maps_hvf = np.flip(np.flip(prob_maps_hvf, 0), 1)
 
             # rotation 90 and flips
             img_r90 = img.rotate(90, expand=True)
@@ -137,10 +137,10 @@ def main():
             img_r90_vf = img_r90.transpose(Image.FLIP_TOP_BOTTOM)  # vertical flip
             img_r90_hvf = img_r90_hf.transpose(Image.FLIP_TOP_BOTTOM)  # horizontal and vertical flips
 
-            input_r90 = test_transform(img_r90).unsqueeze(0)
-            input_r90_hf = test_transform(img_r90_hf).unsqueeze(0)  # horizontal flip input
-            input_r90_vf = test_transform(img_r90_vf).unsqueeze(0)  # vertical flip input
-            input_r90_hvf = test_transform(img_r90_hvf).unsqueeze(0)  # horizontal and vertical flip input
+            input_r90 = test_transform(img_r90).unsqueeze(0).cuda()
+            input_r90_hf = test_transform(img_r90_hf).unsqueeze(0).cuda()  # horizontal flip input
+            input_r90_vf = test_transform(img_r90_vf).unsqueeze(0).cuda()  # vertical flip input
+            input_r90_hvf = test_transform(img_r90_hvf).unsqueeze(0).cuda()  # horizontal and vertical flip input
 
             prob_maps_r90 = get_probmaps(input_r90, model)
             prob_maps_r90_hf = get_probmaps(input_r90_hf, model)
@@ -148,10 +148,10 @@ def main():
             prob_maps_r90_hvf = get_probmaps(input_r90_hvf, model)
 
             # re flip
-            prob_maps_r90 = np.rot90(prob_maps_r90, k=3, axes=(1, 2))
-            prob_maps_r90_hf = np.rot90(np.flip(prob_maps_r90_hf, 2), k=3, axes=(1, 2))
-            prob_maps_r90_vf = np.rot90(np.flip(prob_maps_r90_vf, 1), k=3, axes=(1, 2))
-            prob_maps_r90_hvf = np.rot90(np.flip(np.flip(prob_maps_r90_hvf, 1), 2), k=3, axes=(1, 2))
+            prob_maps_r90 = np.rot90(prob_maps_r90, k=3, axes=(0, 1))
+            prob_maps_r90_hf = np.rot90(np.flip(prob_maps_r90_hf, 1), k=3, axes=(0, 1))
+            prob_maps_r90_vf = np.rot90(np.flip(prob_maps_r90_vf, 0), k=3, axes=(0, 1))
+            prob_maps_r90_hvf = np.rot90(np.flip(np.flip(prob_maps_r90_hvf, 0), 1), k=3, axes=(0, 1))
 
 
             prob_maps = (prob_maps + prob_maps_hf + prob_maps_vf + prob_maps_hvf

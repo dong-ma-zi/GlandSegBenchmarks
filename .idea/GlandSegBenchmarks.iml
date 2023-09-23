@@ -5,6 +5,9 @@
     <orderEntry type="jdk" jdkName="Remote Python 3.9.16 (sftp://wzh@218.192.172.56:41922/home/my/.conda/envs/SYSTME/bin/python)" jdkType="Python SDK" />
     <orderEntry type="sourceFolder" forTests="false" />
   </component>
+  <component name="PyDocumentationSettings">
+    <option name="renderExternalDocumentation" value="true" />
+  </component>
   <component name="PyNamespacePackagesService">
     <option name="namespacePackageFolders">
       <list>
