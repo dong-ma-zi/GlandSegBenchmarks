@@ -86,10 +86,6 @@ def main():
             os.mkdir(prob_maps_folder)
         if not os.path.exists(seg_folder):
             os.mkdir(seg_folder)
-        if not os.path.exists(before_contour_folder):
-            os.mkdir(before_contour_folder)
-        if not os.path.exists(seg_contour_folder):
-            os.mkdir(seg_contour_folder)
 
     for img_name in img_names:
         # load test image
@@ -168,9 +164,11 @@ def main():
             prob_c_maps = (prob_c_maps + prob_maps_hf_c + prob_maps_vf_c + prob_maps_hvf_c
                          + prob_maps_r90_c + prob_maps_r90_hf_c + prob_maps_r90_vf_c + prob_maps_r90_hvf_c) / 8
 
-        pred_o = np.argmax(prob_o_maps, axis=0)
-        pred_c = np.argmax(prob_c_maps, axis=0)
-        pred = np.where(pred_o > 0.5, 1, 0) * np.where(pred_c < 0.5, 1, 0)
+        #pred_o = np.argmax(prob_o_maps, axis=0)
+        #pred_c = np.argmax(prob_c_maps, axis=0)
+        pred_o = np.where(prob_o_maps > 0.5, 1, 0)
+        pred_c = np.where(prob_c_maps > 0.1, 1, 0)
+        pred = np.where(prob_o_maps > 0.5, 1, 0) * np.where(prob_c_maps < 0.1, 1, 0)
         pred_inside = pred == 1
         pred2 = morph.remove_small_objects(pred_inside, args.min_area)  # remove small object
 
@@ -209,17 +207,11 @@ def main():
         # save image
         if save_flag:
             print('\tSaving image results...')
-            #io.imsave('{:s}/{:s}_prob_inside.png'.format(prob_maps_folder, name), (prob_maps[1,:,:] * 255).astype(np.uint8))
-            #io.imsave('{:s}/{:s}_prob_contour.png'.format(prob_maps_folder, name), (prob_maps[2,:,:] * 255).astype(np.uint8))
-            # final_pred = Image.fromarray(pred_labeled.astype(np.uint16))
-            final_pred = Image.fromarray(pred_labeled.astype(np.uint8) * 100)
+            final_pred = pred_labeled.astype(np.uint8) * 100
+            before_pred = pred_o.astype(np.uint8) * 255
+            contour_pred = pred_c.astype(np.uint8) * 255
+            final_pred = Image.fromarray(np.concatenate([final_pred, before_pred, contour_pred], axis=1))
             final_pred.save('{:s}/{:s}_seg.jpg'.format(seg_folder, name))
-
-            before_pred = Image.fromarray(pred_o.astype(np.uint8) * 255)
-            before_pred.save('{:s}/{:s}_seg.jpg'.format(before_contour_folder, name))
-
-            contour_pred = Image.fromarray(pred_c.astype(np.uint8) * 255)
-            contour_pred.save('{:s}/{:s}_seg.jpg'.format(seg_contour_folder, name))
 
             # save colored objects
             # blank = np.ones(shape=(ori_h, 5, 3)) * 255
@@ -291,12 +283,12 @@ def get_probmaps(input, model):
     with torch.no_grad():
         o_output, _, c_output, _ = model(input.cuda())
 
-    prob_o_maps = F.softmax(o_output[0], dim=0).cpu().numpy()
-    prob_c_maps = F.softmax(c_output[0], dim=0).cpu().numpy()
+    prob_o_maps = F.softmax(o_output, dim=1).cpu().numpy()
+    prob_c_maps = F.softmax(c_output, dim=1).cpu().numpy()
     # pred_o = np.argmax(prob_o_maps, axis=0)
     # pred_c = np.argmax(prob_c_maps, axis=0)
     # pred = np.where(pred_o > 0.5, 1, 0) * np.where(pred_c < 0.5, 1, 0)
-    return prob_o_maps, prob_c_maps
+    return prob_o_maps[0, 1, :, :], prob_c_maps[0, 1, :, :]
 
 
 def save_results(header, avg_results, all_results, filename, mode='w'):

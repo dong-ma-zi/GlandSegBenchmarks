@@ -64,8 +64,6 @@ def main():
         #'random_crop': 480,
         'horizontal_flip': True,
         'vertical_flip': True,
-        #'random_affine': 0.3,
-        # 'gaussian_blur': [3, (0.1, 2.0)],
         # 'random_elastic': [6, 15],
         'random_rotation': 90,
         'to_tensor': 1,
