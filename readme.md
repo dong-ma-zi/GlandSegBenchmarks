@@ -1,6 +1,7 @@
 <table>
   <tr>
     <th rowspan="2">Methods</th>
+    <th rowspan="2">Backbone</th>
     <th rowspan="2">Sup</th>
     <th colspan="3">CRAG</th>
     <th colspan="3">GlaS</th>
@@ -23,6 +24,7 @@
   </tr>
 <tr>
     <td>DCAN(report)</td>
+    <td>DeepLab-v1(VGG)</td>
     <td>FullSup</td>
     <td> 0.736 </td>
     <td> 0.794 </td>
@@ -34,6 +36,7 @@
 
 <tr>
     <td>DCAN</td>
+    <td>DeepLab-v1(VGG)</td>
     <td>FullSup</td>
     <td>0.754</td>
     <td>0.806</td>
@@ -44,6 +47,7 @@
   </tr>
 <tr>
     <td>MILD-Net(report)</td>
+    <td>CNN(self-design)</td>
     <td>FullSup</td>
     <td> 0.825 </td>
     <td> 0.875 </td>
@@ -60,6 +64,7 @@
   </tr>
 <tr>
     <td>MILD-Net</td>
+    <td>CNN(self-design)</td>
     <td>FullSup</td>
     <td></td>
     <td></td>
@@ -67,6 +72,39 @@
     <td></td>
     <td></td>
     <td></td>
+  </tr>
+<tr>
+    <td>MedT</td>
+    <td>Transformer(self-design)</td>
+    <td>FullSup</td>
+    <td></td>
+    <td></td>
+    <td></td>
+    <td></td>
+    <td></td>
+    <td></td>
+  </tr>
+<tr>
+    <td>I2CS-B1(report)</td>
+    <td>EfficientNet-B1</td>
+    <td>SemiSup</td>
+    <td>0.834</td>
+    <td>0.877</td>
+    <td>121.42</td>
+    <td>0.860</td>
+    <td>0.881</td>
+    <td>61.78</td>
+  </tr>
+<tr>
+    <td>I2CS-B1</td>
+    <td>EfficientNet-B1</td>
+    <td>SemiSup</td>
+    <td>0.764</td>
+    <td>0.851</td>
+    <td>165.74</td>
+    <td>0.812</td>
+    <td>0.867</td>
+    <td>69.89</td>
   </tr>
   </tr>
 </table>
