@@ -507,7 +507,6 @@ class ResAxialAttentionUNet(nn.Module):
         return self._forward_impl(x)
 
 class medt_net(nn.Module):
-
     def __init__(self, block, block_2, layers, num_classes=2, zero_init_residual=True,
                  groups=8, width_per_group=64, replace_stride_with_dilation=None,
                  norm_layer=None, s=0.125, img_size = 128,imgchan = 3):
