@@ -206,7 +206,8 @@ class Image2D(Dataset):
     def __init__(self, dataset_path: str, transform: Callable = None):
 
         self.dataset_path = dataset_path
-        self.input_path = os.path.join(dataset_path, 'img')
+        # self.input_path = os.path.join(dataset_path, 'img')
+        self.input_path = dataset_path
         self.images_list = os.listdir(self.input_path)
 
         if transform:
