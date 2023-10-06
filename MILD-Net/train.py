@@ -32,7 +32,7 @@ parser.add_argument('--val_freq', type=int, default=10, help='epoch to validate'
 parser.add_argument('--epochs', type=int, default=150, help='number of epochs to train')
 parser.add_argument('--save_dir', type=str, default='./experiments')
 parser.add_argument('--dataset', type=str, choices=['GlaS', 'CRAG'], default='GlaS', help='which dataset be used')
-parser.add_argument('--gpu', type=list, default=[3,], help='GPUs for training')
+parser.add_argument('--gpu', type=list, default=[0,], help='GPUs for training')
 parser.add_argument('--discount_weight', type=float, default=1, help='discount weight')
 args = parser.parse_args()
 

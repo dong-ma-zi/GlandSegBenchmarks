@@ -23,9 +23,9 @@ parser.add_argument('--epochs', type=int, default=100, help='number of epochs to
 parser.add_argument('--save_dir', type=str, default='./experiments')
 parser.add_argument('--img_dir', type=str, default='/home/data2/MedImg/GlandSeg/GlaS/test/Images')
 parser.add_argument('--label_dir', type=str, default='/home/data2/MedImg/GlandSeg/GlaS/test/Annotation')
-parser.add_argument('--model_path', type=str, default='/home/data1/wzh/code/GlandSegBenchmarks/MILD-Net/experiments/GlaS/150/checkpoints/checkpoint_150.pth.tar')
+parser.add_argument('--model_path', type=str, default="/home/data1/my/Project/GlandSegBenchmark/MILD-Net/experiments/GlaS/140/checkpoints/checkpoint_140.pth.tar")
 parser.add_argument('--dataset', type=str, choices=['GlaS', 'CRAG'], default='GlaS', help='which dataset be used')
-parser.add_argument('--gpu', type=list, default=[3,], help='GPUs for training')
+parser.add_argument('--gpu', type=list, default=[2,], help='GPUs for training')
 
 # 后处理参数
 parser.add_argument('--min_area', type=int, default=100, help='minimum area for an object')

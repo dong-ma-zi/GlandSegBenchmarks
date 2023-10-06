@@ -105,6 +105,8 @@ if __name__ == '__main__':
     pred[30:40, 30:40] = 0.8
 
     obj_dice_loss = object_dice_loss(anno, pred)
+
+
     print('Object Dice Loss: ', obj_dice_loss)
 
 
