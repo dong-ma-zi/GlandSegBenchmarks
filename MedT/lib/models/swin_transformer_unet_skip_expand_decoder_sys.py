@@ -767,7 +767,7 @@ class SwinTransformerSys(nn.Module):
 
 
 if __name__ == '__main__':
-    model = SwinTransformerSys(img_size=448, num_classes=2).cuda()
-    x = torch.rand((5, 3, 448, 448)).cuda()
+    model = SwinTransformerSys(img_size=480, num_classes=2).cuda()
+    x = torch.rand((5, 3, 480, 480)).cuda()
     output = model(x)
     print('Output size: ', output.size())

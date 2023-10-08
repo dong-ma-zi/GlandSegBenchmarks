@@ -47,23 +47,22 @@ class SwinUnet(nn.Module):
         logits = self.swin_unet(x)
         return logits
 
-    def load_from(self, pretrained_path):
+    def load_from(self, device, logger, pretrained_path):
         if pretrained_path is not None:
-            print("pretrained_path:{}".format(pretrained_path))
-            device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+            logger.info("pretrained_path:{}".format(pretrained_path))
             pretrained_dict = torch.load(pretrained_path, map_location=device)
             if "model"  not in pretrained_dict:
-                print("---start load pretrained modle by splitting---")
+                logger.info("---start load pretrained modle by splitting---")
                 pretrained_dict = {k[17:]:v for k,v in pretrained_dict.items()}
                 for k in list(pretrained_dict.keys()):
                     if "output" in k:
-                        print("delete key:{}".format(k))
+                        logger.info("delete key:{}".format(k))
                         del pretrained_dict[k]
                 msg = self.swin_unet.load_state_dict(pretrained_dict,strict=False)
                 # print(msg)
                 return
             pretrained_dict = pretrained_dict['model']
-            print("---start load pretrained modle of swin encoder---")
+            logger.info("---start load pretrained model of swin encoder---")
 
             model_dict = self.swin_unet.state_dict()
             full_dict = copy.deepcopy(pretrained_dict)
@@ -75,10 +74,10 @@ class SwinUnet(nn.Module):
             for k in list(full_dict.keys()):
                 if k in model_dict:
                     if full_dict[k].shape != model_dict[k].shape:
-                        print("delete:{};shape pretrain:{};shape model:{}".format(k,v.shape,model_dict[k].shape))
+                        logger.info("delete:{};shape pretrain:{};shape model:{}".format(k,v.shape,model_dict[k].shape))
                         del full_dict[k]
 
             msg = self.swin_unet.load_state_dict(full_dict, strict=False)
             # print(msg)
         else:
-            print("none pretrain")
+            logger.info("none pretrain")
