@@ -156,7 +156,7 @@ class ImageToImage2D(Dataset):
         ## 提取语义分割mask
         # mask[mask<=127] = 0
         # mask[mask>127] = 1
-        mask = np.where(mask > 0, 1, 0).astype(np.uint8)
+        # mask = np.where(mask > 0, 1, 0).astype(np.uint8)
 
         # correct dimensions if needed
         image, mask = correct_dims(image, mask)
@@ -175,6 +175,9 @@ class ImageToImage2D(Dataset):
         # image = np.transpose(image,(2,0,1))
         # print(image.shape)
         # print(mask.shape)
+
+        # test = mask.numpy()
+        # cv2.imwrite('test.jpg', 20 * np.uint8(test))
 
         return image, mask, image_filename
 

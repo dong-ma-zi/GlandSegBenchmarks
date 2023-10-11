@@ -219,12 +219,12 @@ def Hausdorff(S, G):
     hausdorffDistance = max(dist1, dist2)
     return hausdorffDistance
 
-def ObjectDice(S, G):
-    def Dice(A, B):
-        temp = np.logical_and(A, B)
-        dice = 2 * np.sum(temp) / (np.sum(A) + np.sum(B))
-        return dice
+def Dice(A, B):
+    temp = np.logical_and(A, B)
+    dice = 2 * np.sum(temp) / (np.sum(A) + np.sum(B))
+    return dice
 
+def ObjectDice(S, G):
     S = np.single(S)
     G = np.single(G)
 
@@ -277,7 +277,6 @@ def ObjectDice(S, G):
 
     objDice = (temp1 + temp2) / 2
     return objDice
-
 
 
 jaccard_index = make_weighted_metric(classwise_iou)
