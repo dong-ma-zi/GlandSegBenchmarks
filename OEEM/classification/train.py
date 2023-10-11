@@ -46,8 +46,8 @@ if __name__ == '__main__':
     validation_folder_name = 'glas_valid'
     validation_dataset_path = 'glas_cls/2.validation/img'
     validation_mask_path = 'glas_cls/2.validation/mask'
-    crop_validation_images(validation_dataset_path, 320, 256, scales,
-                           validation_folder_name)
+    crop_validation_images(validation_dataset_path, 112, 96, scales,
+                           validation_folder_name, ck='_112_96')
     if not os.path.exists(validation_folder_name):
         os.mkdir(validation_folder_name)
         print('crop validation set images ...')
