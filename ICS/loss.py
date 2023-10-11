@@ -35,22 +35,23 @@ def object_dice_loss(true, pred_ori):
     pred_inst = measure.label(pred)
     pred_inst = morph.remove_small_objects(pred_inst, 100)
     pred_props = measure.regionprops(pred_inst)
-    #v2.imwrite('test.jpg', 50 * true_inst)
+    #cv2.imwrite('test.jpg', 50 * true_inst)
     #cv2.imwrite('test_seg.jpg', 255 * true_inst)
     ## 如果没有预测的腺体实例，直接返回loss 或者实例数量非常多，多于100
     if len(pred_props) == 0 or np.max(true_inst) == 0:
         return torch.tensor(1.0).cuda()
 
     ## label修正
-    # new_true_inst = np.zeros_like(true_inst)
-    # count = 1
-    # for i in range(1, np.max(true_inst)+1):
-    #     true_map = np.array(true_inst == i, np.uint8)
-    #     temp_inst = measure.label(true_map)
-    #     for j in range(1, np.max(temp_inst)+1):
-    #         new_true_inst[temp_inst == j] = count
-    #         count += 1
-    # true_inst = new_true_inst
+    new_true_inst = np.zeros_like(true_inst)
+    count = 1
+    for i in range(1, np.max(true_inst)+1):
+        true_map = np.array(true_inst == i, np.uint8)
+        temp_inst = measure.label(true_map)
+        for j in range(1, np.max(temp_inst)+1):
+            new_true_inst[temp_inst == j] = count
+            count += 1
+    true_inst = new_true_inst
+    #cv2.imwrite('test_after.jpg', 50 * true_inst)
 
     true_props = measure.regionprops(true_inst)
     for i, pred_prop in enumerate(pred_props):

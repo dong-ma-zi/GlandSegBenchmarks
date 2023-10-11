@@ -32,7 +32,7 @@ parser.add_argument('--checkpoint_freq', type=int, default=50, help='epoch to sa
 parser.add_argument('--val_freq', type=int, default=50, help='epoch to validate')
 parser.add_argument('--epochs', type=int, default=400, help='number of epochs to train')
 parser.add_argument('--save_dir', type=str, default='./experiments/')
-parser.add_argument('--dataset', type=str, choices=['GlaS', 'CRAG'], default='GlaS', help='which dataset be used')
+parser.add_argument('--dataset', type=str, choices=['GlaS', 'CRAG'], default='CRAG', help='which dataset be used')
 parser.add_argument('--gpu', type=list, default=[3,], help='GPUs for training')
 parser.add_argument('--gamma1', type=float, default=1, help='weight for dice loss')
 parser.add_argument('--gamma2', type=float, default=0.5, help='weight for object-level dice loss')
@@ -78,8 +78,12 @@ def main():
     for x in ['train', 'val']:
         # img_dir = '/home/data2/MedImg/GlandSeg/%s/wzh/train/480x480/Images/' % (args.dataset)
         # target_dir = '/home/data2/MedImg/GlandSeg/%s/wzh/train/480x480/Annotation/' % (args.dataset)
-        img_dir = '/home/data2/MedImg/GlandSeg/%s/train/Images' % (args.dataset)
-        target_dir = '/home/data2/MedImg/GlandSeg/%s/train/Annotation' % (args.dataset)
+        ## GlaS
+        # img_dir = '/home/data2/MedImg/GlandSeg/%s/train/Images' % (args.dataset)
+        # target_dir = '/home/data2/MedImg/GlandSeg/%s/train/Annotation' % (args.dataset)
+        ## CRAG
+        img_dir = '/home/data2/MedImg/GlandSeg/%s/train/TrainSet/Images' % (args.dataset)
+        target_dir = '/home/data2/MedImg/GlandSeg/%s/train/TrainSet/Annotation' % (args.dataset)
         dir_list = [img_dir, target_dir]
         # post_fix = ['weight.png', 'label.png']
 
