@@ -27,7 +27,7 @@ parser.add_argument('--learning_rate', default=1e-4, type=float, help='initial l
 parser.add_argument('--momentum', default=0.9, type=float, help='momentum')
 parser.add_argument('--weight-decay', '--wd', default=1e-5, type=float, help='weight decay (default: 1e-5)')
 parser.add_argument('--save_freq', type=int,default = 50)
-parser.add_argument('--dataset', type=str, choices=['GlaS', 'CRAG'], default='GlaS', help='which dataset be used')
+parser.add_argument('--dataset', type=str, choices=['GlaS', 'CRAG'], default='CRAG', help='which dataset be used')
 
 parser.add_argument('--modelname', default='swinUnet', type=str, help='type of model')
 parser.add_argument('--cuda', default="on", type=str, help='switch on/off cuda option (default: on)')

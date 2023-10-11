@@ -52,9 +52,9 @@
     <td> 0.825 </td>
     <td> 0.875 </td>
     <td> 160.14 </td>
-    <td></td>
-    <td></td>
-    <td></td>
+    <td>0.879</td>
+    <td>0.874</td>
+    <td>73.715</td>
     <td> 0.914 </td>
     <td> 0.913 </td>
     <td> 41.54 </td>
@@ -69,9 +69,9 @@
     <td></td>
     <td></td>
     <td></td>
-    <td></td>
-    <td></td>
-    <td></td>
+    <td>0.807</td>
+    <td>0.843</td>
+    <td>86.423</td>
   </tr>
 <tr>
     <td>MedT</td>
@@ -83,6 +83,17 @@
     <td></td>
     <td></td>
     <td></td>
+  </tr>
+<tr>
+    <td>SwinUnet</td>
+    <td>Transformer(self-design)</td>
+    <td>FullSup</td>
+    <td>0.665</td>
+    <td>0.776</td>
+    <td>284.753</td>
+    <td>0.828</td>
+    <td>0.858</td>
+    <td>78.642</td>
   </tr>
 <tr>
     <td>I2CS-B1(report)</td>
