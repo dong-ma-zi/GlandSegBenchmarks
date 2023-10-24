@@ -9,6 +9,15 @@ from scipy import ndimage
 from skimage import measure
 
 
+def dice_loss(true, pred, smooth=1e-3):
+    """`pred` and `true` must be of torch.float32. Assuming of shape NxHxWxC."""
+    inse = torch.sum(pred * true, (0, 1, 2))
+    l = torch.sum(pred, (0, 1, 2))
+    r = torch.sum(true, (0, 1, 2))
+    loss = 1.0 - (2.0 * inse + smooth) / (l + r + smooth)
+    loss = torch.sum(loss)
+    return loss
+
 def accuracy_pixel_level(output, target):
     """ Computes the accuracy during training and validation for ternary label """
     batch_size = target.shape[0]

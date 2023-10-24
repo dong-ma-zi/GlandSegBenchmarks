@@ -24,8 +24,8 @@ if __name__ == "__main__":
 
     # win_size = [540, 540]
     # step_size = [164, 164]
-    win_size = [480, 480]
-    step_size = [480, 480]
+    win_size = [448, 448]
+    step_size = [224, 224]
     # win_size = [300, 300]
     # step_size = [150, 150]
 
@@ -35,8 +35,8 @@ if __name__ == "__main__":
     # This used to get the specific dataset img and ann loading scheme from dataset.py
 
     ###################### kumar ######################################
-    dataset_name = "kumar"
-    save_root = "/home/data2/MedImg/GlandSeg/GlaS/wzh/"
+    # dataset_name = "kumar"
+    save_root = "/home/data2/MedImg/GlandSeg/GlaS/my/"
 
     # a dictionary to specify where the dataset path should be
     dataset_info = {

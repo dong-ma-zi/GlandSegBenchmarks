@@ -9,12 +9,11 @@ import torch.optim
 import torch.backends.cudnn as cudnn
 from torch.utils.data import DataLoader
 import torch.utils.data
-import torch.nn.functional as F
 import os
 import shutil
 import numpy as np
 import logging
-from models.Vit_Sam import Vit_SAM
+from models.Vit_CNN import Vit_CNN
 from options import Options
 from dataloader import DataFolder
 from my_transforms import get_transforms
@@ -25,18 +24,28 @@ import argparse
 
 warnings.filterwarnings('ignore')
 parser = argparse.ArgumentParser(description="Train SAM Segmentation Model")
+# training para
+parser.add_argument('--gpu', type=list, default=[0], help='GPUs for training')
 parser.add_argument('--batch_size', type=int, default=1, help='input batch size for training')
-parser.add_argument('--num_workers', type=int, default=0, help='number of workers to load images')
-parser.add_argument('--lr', type=float, default=1e-4, help='learning rate 1e-5 for nuclei sam')
+parser.add_argument('--num_workers', type=int, default=4, help='number of workers to load images')
+parser.add_argument('--lr', type=float, default=1e-4, help='learning rate')
 parser.add_argument('--weight_decay', type=float, default=1e-4, help='weight decay')
 parser.add_argument('--checkpoint', type=str, default=None, help='start from checkpoint')
 parser.add_argument('--checkpoint_freq', type=int, default=10, help='epoch to save checkpoints')
 parser.add_argument('--val_freq', type=int, default=10, help='epoch to validate')
 parser.add_argument('--epochs', type=int, default=100, help='number of epochs to train')
 parser.add_argument('--save_dir', type=str, default='./experimentsP3')
-parser.add_argument('--dataset', type=str, choices=['GlaS', 'CRAG'], default='GlaS', help='which dataset be used')
-parser.add_argument('--desc', type=str, default='Vit-SAM-ft-all')
-parser.add_argument('--gpu', type=list, default=[2,], help='GPUs for training')
+
+# dataset
+parser.add_argument('--dataset', type=str, choices=['GlaS', 'CRAG'], default='Glas', help='which dataset be used')
+parser.add_argument('--desc', type=str, default='Vit-CNN-vit-h-1024-16-256-ft-all')
+
+# training mode
+parser.add_argument('--vit_mode', type=str, default='vit_h')
+parser.add_argument('-image_size', type=int, default=1024, help='image_size')
+parser.add_argument('-out_chans', type=int, default=256, help='output_size')
+parser.add_argument('-patch_size', type=int, default=16, help='patch_size')
+parser.add_argument('-embed_dim', type=int, default=1280, help='patch_size')
 args = parser.parse_args()
 
 def main():
@@ -47,35 +56,52 @@ def main():
     # opt.save_options()
 
     os.environ['CUDA_VISIBLE_DEVICES'] = ','.join(str(x) for x in args.gpu)
+    # torch.cuda.set_device(0)
 
     # set up logger
     logger, logger_results = setup_logging()
     # opt.print_options(logger)
 
     # ----- create model ----- #
-    model = Vit_SAM(num_types=2)
+    model = Vit_CNN(args, num_types=2, vit_mode=args.vit_mode).cuda()
     # load pretrained vit res
-    weight_dict = torch.load("/home/data1/my/Project/segment-anything-main/sam_vit_b.pth")
-    weight_dict_load = {k: v for k, v in weight_dict.items() if k in model.state_dict() and model.state_dict()[k].numel() == v.numel()}
-    model.load_state_dict(weight_dict_load,
-                          strict=False)
-    model = model.cuda()
+    weight_dict = torch.load("/home/data1/my/Project/segment-anything-main/sam_vit_h.pth")
+    # load_weight_dict = {k: v for k, v in weight_dict.items() if
+    #                     k in model.state_dict() and model.state_dict()[k].numel() == v.numel()}
+    # model.load_state_dict(load_weight_dict,
+    #                       strict=False)
+    model.load_state_dict(weight_dict, strict=False)
+
+    # model = model.cuda()
+    # model = nn.DataParallel(model, device_ids=args.gpu)
     torch.backends.cudnn.benchmark = True
 
     # ----- define optimizer and lr_scheduler----- #
+
+    # # frozen encoder
+    # if isinstance(model, nn.DataParallel):
+    #     para_list  = model.module.named_parameters()
+    # else:
+    #     para_list = model.named_parameters()
     # frozen_list = ['image_encoder']
-    # for param in model.named_parameters():
+    # for param in para_list:
+    #     # if param[0].split('.')[0] in frozen_list and param[0].split('.')[1] != 'pos_embed' and param[0].split('.')[1] != 'patch_embed':
     #     if param[0].split('.')[0] in frozen_list:
     #         print('frozen layers:', param[0])
     #         param[1].requires_grad = False
 
     # Init optimizer
+    # optimizer = torch.optim.Adam(
+    #     [# {'params': model.image_encoder.parameters(), 'lr': args.lr * 0.01},
+    #      {'params': model.image_encoder.patch_embed.parameters(), 'lr': args.lr * 0.01},
+    #      {'params': model.image_encoder.pos_embed, 'lr': args.lr * 0.01},
+    #      {'params': model.decoder.parameters()}],
+    #     lr=args.lr, betas=(0.9, 0.99), weight_decay=args.weight_decay)
+
     optimizer = torch.optim.Adam(
-        [{'params': model.image_encoder.parameters(), 'lr': args.lr * 0.01},
-         {'params': model.mask_decoder.parameters()}],
+        [param for param in model.parameters() if param.requires_grad == True],
         lr=args.lr, betas=(0.9, 0.99), weight_decay=args.weight_decay)
-    # optimizer = torch.optim.Adam(model.parameters(), args.lr, betas=(0.9, 0.99),
-    #                              weight_decay=args.weight_decay)
+
     # scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[100, 200, 300], gamma=0.1)
 
     # ----- define criterion ----- #
@@ -97,10 +123,11 @@ def main():
     })}
 
     # ----- load data ----- #
-    data_path = {'train': '/home/data2/MedImg/GlandSeg/GlaS/train/TrainSet',
-                 'val': '/home/data2/MedImg/GlandSeg/GlaS/train/ValidSet/'}
+    data_path = {'train': '/home/data2/MedImg/GlandSeg/GlaS/my/train/448x448/',
+                 'val': '/home/data2/MedImg/GlandSeg/GlaS/my/valid/448x448/'}
     # data_path = {'train': '/home/data2/MedImg/NucleiSeg/MoNuSeg/extracted_mirror/train/512x512_256x256/',
     #              'val': '/home/data2/MedImg/NucleiSeg/MoNuSeg/Test'}
+
     dsets = {}
     for x in ['train', 'val']:
         img_dir = os.path.join(data_path[x], 'Images')
@@ -152,9 +179,15 @@ def main():
             save_dir = "%s/%s_%s/" % (args.save_dir, args.dataset, args.desc)
             if not os.path.exists(save_dir):
                 os.mkdir(save_dir)
+
+            if isinstance(model, nn.DataParallel):
+                dict_save = model.module.state_dict()
+            else:
+                dict_save = model.state_dict()
+
             save_checkpoint({
                 'epoch': epoch + 1,
-                'state_dict': model.state_dict(),
+                'state_dict': dict_save, # model.state_dict(),
                 'best_iou': best_iou,
                 'optimizer': optimizer.state_dict(),
             }, epoch, is_best, save_dir, cp_flag)
@@ -178,21 +211,15 @@ def train(train_loader, model, criterion, optimizer, epoch):
 
         # label = label_seg.int().type(torch.LongTensor).cuda()
         img = img.cuda()
-        b, c, h, w = img.shape
         label = label.cuda()
 
         # compute output
         o_output = model(img)
-        # mask size: [batch*num_classes, num_multi_class, H, W], iou_pred: [batch*num_classes, 1]
-        o_output = o_output.view(b, -1, h, w)
+
         # compute loss
         loss_bce = criterion(o_output, label)
-
-        # x = F.one_hot(label, num_classes=2).type(torch.float32)
-        # y = o_output.permute(0, 2, 3, 1)
-        loss_dice = utils.dice_loss(F.one_hot(label, num_classes=2).type(torch.float32),
-                                    o_output.permute(0, 2, 3, 1))
-        loss = loss_bce + loss_dice
+        loss_dice = utils.dice_loss(label, o_output[:, 1, :, :])
+        loss = loss_bce # + loss_dice
 
         # measure accuracy and record loss
         pred = np.argmax(o_output.data.cpu().numpy(), axis=1)
@@ -229,13 +256,10 @@ def validate(val_loader, model, criterion):
         img, label_seg = sample
         label = label_seg.int().type(torch.LongTensor).cuda()
         img = img.cuda()
-        b, c, h, w = img.shape
         label = label.cuda()
 
         # compute output
         o_output = model(img)
-        # mask size: [batch*num_classes, num_multi_class, H, W], iou_pred: [batch*num_classes, 1]
-        o_output = o_output.view(b, -1, h, w)
         # compute loss
         loss = criterion(o_output, label)
 

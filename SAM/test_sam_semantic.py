@@ -18,16 +18,12 @@ import argparse
 from multiprocessing import Array, Process
 import random
 import cv2
-import re
+import math
 
 parser = argparse.ArgumentParser(description="Testing oeem segmentation Model")
-parser.add_argument('--batch_size', type=int, default=4, help='input batch size for training')
-parser.add_argument('--num_workers', type=int, default=2, help='number of workers to load images')
-parser.add_argument('--weight_decay', type=float, default=1e-4, help='weight decay')
-parser.add_argument('--checkpoint', type=str, default=None, help='start from checkpoint')
-parser.add_argument('--checkpoint_freq', type=int, default=10, help='epoch to save checkpoints')
-parser.add_argument('--epochs', type=int, default=100, help='number of epochs to train')
-parser.add_argument('--save_dir', type=str, default='./experimentsP')
+
+parser.add_argument('--save_dir', type=str, default='./experimentsP3')
+
 parser.add_argument('--img_dir', type=str, default='/home/data1/my/Project/GlandSegBenchmark/OEEM/classification/glas_cls/2.validation/img')
 parser.add_argument('--label_dir', type=str, default='/home/data1/my/Project/GlandSegBenchmark/OEEM/classification/glas_cls/2.validation/mask')
 
@@ -36,20 +32,22 @@ parser.add_argument('--label_dir', type=str, default='/home/data1/my/Project/Gla
 
 # parser.add_argument('--img_dir', type=str, default='/home/data2/MedImg/GlandSeg/GlaS/wzh/valid/480x480/Images/')
 # parser.add_argument('--label_dir', type=str, default='/home/data2/MedImg/GlandSeg/GlaS/wzh/valid/480x480/Annotation/')
-
+''
 parser.add_argument('--desc', type=str,
-                    default='Vit-SAM',
+                    default='Vit-SAM-ft-all',
 
                     )
 
 parser.add_argument('--model_path', type=str,
-                    default="/home/data1/my/Project/GlandSegBenchmark/SAM/experimentsP/GlaS_Vit-SAM/checkpoints/checkpoint_100.pth.tar")
+                    # default="/home/data1/my/Project/GlandSegBenchmark/SAM/experimentsP3/GlaS_Vit-SAM-ft-all/checkpoints/checkpoint_100.pth.tar"
+                    default="/home/data1/my/Project/GlandSegBenchmark/SAM/experimentsP3/GlaS_Vit-CNN-ft-all/checkpoints/checkpoint_100.pth.tar"
+                    )
 
 parser.add_argument('--dataset', type=str, choices=['GlaS', 'CRAG'], default='GlaS', help='which dataset be used')
 parser.add_argument('--gpu', type=list, default=[0, ], help='GPUs for training')
 
 # 后处理参数
-parser.add_argument('--min_area', type=int, default=30, help='minimum area for an object')
+parser.add_argument('--min_area', type=int, default=400, help='minimum area for an object')
 parser.add_argument('--radius', type=int, default=4)
 args = parser.parse_args()
 
@@ -86,6 +84,7 @@ def main():
 
     # ----- load trained model ----- #
     print("=> loading trained model")
+    assert os.path.exists(model_path)
 
     checkpoint = torch.load(model_path)
     model.load_state_dict(checkpoint['state_dict'])
@@ -115,7 +114,8 @@ def main():
         if not os.path.exists(vis_maps_folder):
             os.mkdir(vis_maps_folder)
 
-
+    imgsize = 224
+    stride = 224
     for img_name in img_names:
         # load test image
         print('=> Processing image {:s}'.format(img_name))
@@ -124,14 +124,48 @@ def main():
         name = os.path.splitext(img_name)[0]
 
         ########################### esenbling from multi-scale #################################
-        h, w = orig_img.size
-        img = Image.open(img_path)
-        img = test_transform(img).unsqueeze(0).cuda()
-        with torch.no_grad():
-            out = model(img)
 
-        out = out.view(1, -1, w, h)
-        pred = np.argmax(out[0].cpu().numpy(), axis=0)
+        image = Image.open(img_path).convert('RGB')
+        image = np.array(image)
+        h, w, _ = image.shape
+
+        padding_h = int(math.ceil(h / stride) * stride)
+        padding_w = int(math.ceil(w / stride) * stride)
+        padding_output = np.zeros((1, 2, padding_h, padding_w))
+        padding_weight_mask = np.zeros_like(padding_output)
+
+        for h_ in range(0, padding_h - stride + 1, int(stride // 1)):
+            for w_ in range(0, padding_w - stride + 1, int(stride // 1)):
+                img_padding = np.zeros((imgsize, imgsize, 3), np.uint8)
+                slice = image[h_:h_ + imgsize, w_:w_ + imgsize, :]
+                t_h, t_w, _ = slice.shape
+                img_padding[:t_h, :t_w] = slice
+
+                img = test_transform(img_padding).unsqueeze(0).cuda()
+                output = model(img)
+
+                output = F.softmax(output, dim=1).detach().cpu().numpy()
+                weight_mask = np.ones_like(output)
+
+                padding_output[:, :, h_:h_ + imgsize, w_:w_ + imgsize] += output
+                padding_weight_mask[:, :, h_:h_ + imgsize, w_:w_ + imgsize] += weight_mask
+                del output, img, img_padding, slice
+
+        padding_output /= padding_weight_mask
+        output = padding_output[:, :, :h, :w]
+        pred = np.argmax(output, axis=1)
+        pred = pred[0].astype(int)
+
+        # h, w = orig_img.size
+        # img = Image.open(img_path)
+        # img = test_transform(img).unsqueeze(0).cuda()
+        # with torch.no_grad():
+        #     out = model(img)
+        #
+        # out = out.view(1, -1, w, h)
+        # pred = np.argmax(out[0].cpu().numpy(), axis=0)
+
+
         ############################### post proc ################################################
         # 将二值图像转换为标签图像
         label_image = label(pred)
@@ -144,19 +178,13 @@ def main():
         ################################################################################################ # remove small object
 
         if eval_flag:
-            # label_path = '{:s}/{:s}_anno.bmp'.format(label_dir, name)
+
             label_path = '{:s}/{:s}.png'.format(label_dir, name)
             label_img = io.imread(label_path)
             label_img = cv2.cvtColor(label_img, cv2.COLOR_BGR2GRAY)
             label_img = np.array(label_img == 76, dtype=np.uint8)
             # label_img = scio.loadmat('{:s}/{:s}.mat'.format(label_dir, name))['inst_map']
             # label_img = np.array(label_img != 0, dtype=np.uint8)
-            # label_path = '{:s}/{:s}.png'.format(label_dir, name))
-        # input = test_transform(img).unsqueeze(0)
-
-        # print('\tComputing output probability maps...')
-        # pred = get_predmaps(input, model)
-
 
         if eval_flag:
             img_show = np.concatenate([np.array(orig_img),
@@ -256,12 +284,14 @@ def get_overall_valid_score(pred_image_path, groundtruth_path, num_workers=1, nu
 
         for im_name in image_list:
             cam = np.load(os.path.join(pred_image_path, f"{im_name}.npy"), allow_pickle=True).astype(np.uint8).reshape(-1)
+
             # groundtruth = np.asarray(Image.open(groundtruth_path + f"/{im_name}_anno.bmp")).reshape(-1)
             # groundtruth = np.asarray(Image.open(groundtruth_path + f"/{im_name}.png")).reshape(-1)
 
             groundtruth = io.imread(groundtruth_path + f"/{im_name}.png")
             groundtruth = cv2.cvtColor(groundtruth, cv2.COLOR_BGR2GRAY)
             groundtruth = np.array(groundtruth == 76, dtype=np.uint8).reshape(-1)
+
             # groundtruth = scio.loadmat(groundtruth_path + f"/{im_name}.mat")['inst_map']
             # groundtruth = np.array(groundtruth != 0, dtype=np.uint8).reshape(-1)
 

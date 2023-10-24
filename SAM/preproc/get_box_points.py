@@ -74,7 +74,7 @@ if __name__ == '__main__':
     patch_paths = os.listdir(f'/home/data2/MedImg/GlandSeg/GlaS/test/Images')
     # monusac
     save_dir = f'/home/data2/MedImg/GlandSeg/GlaS/test/Prompts'
-    os.makedirs(save_dir, exist_ok=True)
+    # os.makedirs(save_dir, exist_ok=True)
 
     for patch_path in tqdm.tqdm(patch_paths):
         # monusac
@@ -84,34 +84,36 @@ if __name__ == '__main__':
 
         inst_map = cv2.imread(os.path.join(basePath, 'Annotation', save_name + '_anno.bmp'))[:, :, 0]
 
-        # get the nuclei instance
         insts = np.unique(inst_map).tolist()
-        insts.remove(0)
-        boundaries = []
-        for i in insts:
-            boundaries += \
-            cv2.findContours((inst_map == i).astype(np.uint8), cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)[0]
-
-        point_list = []
-        box_list = []
-        for boundary in boundaries:
-            M = cv2.moments(boundary)
-            try:
-                center_x = int(M["m10"] / M["m00"])
-                center_y = int(M["m01"] / M["m00"])
-            except:
-                continue
-            point_list += [np.array([center_x, center_y])[np.newaxis, :]]
-
-            minx = np.min(boundary[:, :, 0])
-            miny = np.min(boundary[:, :, 1])
-            maxx = np.max(boundary[:, :, 0])
-            maxy = np.max(boundary[:, :, 1])
-            box_list += [np.array([minx, miny, maxx, maxy])[np.newaxis, :]]
-
-
-        prompt_dict = {'points': np.concatenate(point_list, axis=0),
-                       'boxes': np.concatenate(box_list, axis=0)}
-
-        scio.savemat(os.path.join(save_dir, save_name + '.mat'), prompt_dict)
+        x = 1
+        # # get the nuclei instance
+        # insts = np.unique(inst_map).tolist()
+        # insts.remove(0)
+        # boundaries = []
+        # for i in insts:
+        #     boundaries += \
+        #     cv2.findContours((inst_map == i).astype(np.uint8), cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)[0]
+        #
+        # point_list = []
+        # box_list = []
+        # for boundary in boundaries:
+        #     M = cv2.moments(boundary)
+        #     try:
+        #         center_x = int(M["m10"] / M["m00"])
+        #         center_y = int(M["m01"] / M["m00"])
+        #     except:
+        #         continue
+        #     point_list += [np.array([center_x, center_y])[np.newaxis, :]]
+        #
+        #     minx = np.min(boundary[:, :, 0])
+        #     miny = np.min(boundary[:, :, 1])
+        #     maxx = np.max(boundary[:, :, 0])
+        #     maxy = np.max(boundary[:, :, 1])
+        #     box_list += [np.array([minx, miny, maxx, maxy])[np.newaxis, :]]
+        #
+        #
+        # prompt_dict = {'points': np.concatenate(point_list, axis=0),
+        #                'boxes': np.concatenate(box_list, axis=0)}
+        #
+        # scio.savemat(os.path.join(save_dir, save_name + '.mat'), prompt_dict)
 

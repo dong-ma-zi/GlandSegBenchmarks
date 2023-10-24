@@ -73,7 +73,7 @@ class DataFolder(data.Dataset):
         img = np.array(Image.open(img_paths[0]).convert('RGB'))
         label = np.array(Image.open(img_paths[1]))
         # label = scio.loadmat(img_paths[1])['inst_map']
-        label = np.array(label != 0, dtype=np.int32)
+        # label = np.array(label != 0, dtype=np.int32)
 
         if self.data_transform is not None:
             sample = self.data_transform([Image.fromarray(img), Image.fromarray(label)])

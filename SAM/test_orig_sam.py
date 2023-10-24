@@ -19,38 +19,30 @@ import numpy as np
 import argparse
 
 parser = argparse.ArgumentParser(description="Testing oeem segmentation Model")
-parser.add_argument('--batch_size', type=int, default=4, help='input batch size for training')
-parser.add_argument('--num_workers', type=int, default=2, help='number of workers to load images')
-parser.add_argument('--weight_decay', type=float, default=1e-4, help='weight decay')
-parser.add_argument('--checkpoint', type=str, default=None, help='start from checkpoint')
-parser.add_argument('--checkpoint_freq', type=int, default=10, help='epoch to save checkpoints')
-parser.add_argument('--epochs', type=int, default=100, help='number of epochs to train')
-parser.add_argument('--save_dir', type=str, default='./experimentsP')
+parser.add_argument('--save_dir', type=str, default='./experimentsP3')
 
+parser.add_argument('--img_dir', type=str, default='/home/data2/MedImg/NucleiSeg/MoNuSeg/Test/Images')
+parser.add_argument('--label_dir', type=str, default='/home/data2/MedImg/NucleiSeg/MoNuSeg/Test/Annotation')
+parser.add_argument('--prompt_dir', type=str, default='/home/data2/MedImg/NucleiSeg/MoNuSeg/Test/Prompts')
 
-# parser.add_argument('--img_dir', type=str, default='/home/data2/MedImg/NucleiSeg/MoNuSeg/Test/Images')
-# parser.add_argument('--label_dir', type=str, default='/home/data2/MedImg/NucleiSeg/MoNuSeg/Test/Annotation')
-# parser.add_argument('--prompt_dir', type=str, default='/home/data2/MedImg/NucleiSeg/MoNuSeg/Test/Prompts')
-
-parser.add_argument('--img_dir', type=str, default='/home/data2/MedImg/GlandSeg/GlaS/test/Images')
-parser.add_argument('--label_dir', type=str, default='/home/data2/MedImg/GlandSeg/GlaS/test/Annotation')
-parser.add_argument('--prompt_dir', type=str, default='/home/data2/MedImg/GlandSeg/GlaS/test/Prompts')
+# parser.add_argument('--img_dir', type=str, default='/home/data2/MedImg/GlandSeg/GlaS/test/Images')
+# parser.add_argument('--label_dir', type=str, default='/home/data2/MedImg/GlandSeg/GlaS/test/Annotation')
+# parser.add_argument('--prompt_dir', type=str, default='/home/data2/MedImg/GlandSeg/GlaS/test/Prompts')
 
 parser.add_argument('--desc', type=str,
-                    default='SAM-Orig-5-point',
-                    # default='SAM-Anything-mode',
+                    # default='SAM-vit-h-sam',
+                    default='SAM-vit-h-20-points',
                     )
 
-parser.add_argument('--model', type=str, default="vit_b")
+parser.add_argument('--model', type=str, default="vit_h")
 parser.add_argument('--model_path', type=str,
-                    default="/home/data1/my/Project/segment-anything-main/sam_vit_b.pth")
+                    default="/home/data1/my/Project/segment-anything-main/sam_vit_h.pth")
 
-parser.add_argument('--dataset', type=str, choices=['GlaS', 'CRAG'], default='Glas', help='which dataset be used')
-parser.add_argument('--gpu', type=list, default=[0, ], help='GPUs for training')
+parser.add_argument('--dataset', type=str, choices=['GlaS', 'CRAG'], default='MoNuSeg', help='which dataset be used')
+parser.add_argument('--gpu', type=list, default=[1, ], help='GPUs for training')
 
 # 后处理参数
-parser.add_argument('--min_area', type=int, default=400, help='minimum area for an object')
-parser.add_argument('--radius', type=int, default=4)
+parser.add_argument('--min_area', type=int, default=32, help='minimum area for an object')
 args = parser.parse_args()
 
 
@@ -82,7 +74,11 @@ def main():
             os.mkdir(vis_maps_folder)
 
     sam = sam_model_registry[args.model](checkpoint=args.model_path).cuda()
+
+    # predictor mode
     predictor = SamPredictor(sam)
+
+    # anything mode
     # mask_generator = SamAutomaticMaskGenerator(sam)
 
 
@@ -93,40 +89,60 @@ def main():
         orig_img = Image.open(img_path)
         name = os.path.splitext(img_name)[0]
 
-        ########################### esenbling from multi-scale #################################
+        ################################################################################################
         img = Image.open(img_path)
-        # x = np.array(img)
+
+        #-------------------------- Any Mode -------------------------------#
         # masks = mask_generator.generate(np.array(img))
         # width, height = img.size
         # pred = np.zeros(shape=(height, width))
         # for mask in masks:
-        #     if mask['area'] > 150000: continue
+        #     # if mask['area'] > 150000: continue
+        #     if mask['area'] > 10000: continue
         #     pred += mask['segmentation']
+        # ------------------------------------------------------------------#
 
+        # get points/boxes prompts
         predictor.set_image(np.array(img))
-
         points = scio.loadmat('{:s}/{:s}.mat'.format(prompt_dir, name))['points']
+        points = points[:, np.newaxis, :] # K, 2 --> N, K, 2
         boxes = scio.loadmat('{:s}/{:s}.mat'.format(prompt_dir, name))['boxes']
 
-        pointNums = 5
+        #----------------------- ponits promp ------------------------------#
+        # selected points
+        pointNums = 20
         pointNums = pointNums if pointNums < points.shape[0] else points.shape[0]
         random_indices = np.random.choice(points.shape[0], pointNums, replace=False)
-        points_selected = points[random_indices, :]
-        mask, _, _ = predictor.predict(point_coords=points_selected, point_labels=np.ones(shape=(points_selected.shape[0], )),
-                                       multimask_output=False)
-        pred = mask[0]
+        points_selected = points[random_indices, :, :]
+        width, height = img.size
+        pred = np.zeros(shape=(height, width))
+        for i in range(points_selected.shape[0]):
+            mask, _, _ = predictor.predict(point_coords=points_selected[i],
+                                           point_labels=np.array([1]),
+                                           # point_labels=np.ones(shape=(points_selected.shape[0], )),
+                                           multimask_output=False)
+            pred += mask[0]
 
-        # mask, _, _ = predictor.predict(point_coords=points, point_labels=np.ones(shape=(points.shape[0], )),
-        #                                multimask_output=False)
-        # pred = mask[0]
 
+        # total points
+        # width, height = img.size
+        # pred = np.zeros(shape=(height, width))
+        # for i in range(points.shape[0]):
+        #     mask, _, _ = predictor.predict(point_coords=points[i], point_labels=np.array([1]),
+        #                                    multimask_output=False)
+        #     pred += mask[0]
+        # ----------------------- ponits promp ------------------------------#
+
+        # ------------------------ boxes promp ------------------------------#
         # width, height = img.size
         # pred = np.zeros(shape=(height, width))
         # for b in range(boxes.shape[0]):
         #     box = boxes[b]
         #     mask, _, _ = predictor.predict(box=box, multimask_output=False)
         #     pred += mask[0]
+        # ------------------------ boxes promp ------------------------------#
 
+        ########################################################################################################
 
         ############################### post proc ################################################
         # 将二值图像转换为标签图像
@@ -140,8 +156,8 @@ def main():
         ###############################################################################################
 
         if eval_flag:
-            # label_img = scio.loadmat('{:s}/{:s}.mat'.format(label_dir, name))['inst_map']
-            label_img = cv2.imread('{:s}/{:s}_anno.bmp'.format(label_dir, name))[:, :, 0]
+            label_img = scio.loadmat('{:s}/{:s}.mat'.format(label_dir, name))['inst_map']
+            # label_img = cv2.imread('{:s}/{:s}_anno.bmp'.format(label_dir, name))[:, :, 0]
             label_img = np.array(label_img != 0, dtype=np.uint8)
 
 
@@ -243,16 +259,11 @@ def get_overall_valid_score(pred_image_path, groundtruth_path, num_workers=1, nu
 
         for im_name in image_list:
             cam = np.load(os.path.join(pred_image_path, f"{im_name}.npy"), allow_pickle=True).astype(np.uint8).reshape(-1)
-            # groundtruth = np.asarray(Image.open(groundtruth_path + f"/{im_name}_anno.bmp")).reshape(-1)
-            # groundtruth = np.asarray(Image.open(groundtruth_path + f"/{im_name}.png")).reshape(-1)
+            groundtruth = scio.loadmat(groundtruth_path + f"/{im_name}.mat")['inst_map']
+            groundtruth = np.array(groundtruth != 0, dtype=np.uint8).reshape(-1)
 
-            # groundtruth = io.imread(groundtruth_path + f"/{im_name}.png")
-            # groundtruth = cv2.cvtColor(groundtruth, cv2.COLOR_BGR2GRAY)
-            # groundtruth = np.array(groundtruth == 76, dtype=np.uint8).reshape(-1)
-            # groundtruth = scio.loadmat(groundtruth_path + f"/{im_name}.mat")['inst_map']
-            # groundtruth = np.array(groundtruth != 0, dtype=np.uint8).reshape(-1)
-            groundtruth = cv2.imread(groundtruth_path + f"/{im_name}_anno.bmp")[:, :, 0].reshape(-1)
-            groundtruth = np.array(groundtruth != 0, dtype=np.uint8)
+            # groundtruth = cv2.imread(groundtruth_path + f"/{im_name}_anno.bmp")[:, :, 0].reshape(-1)
+            # groundtruth = np.array(groundtruth != 0, dtype=np.uint8)
 
             gt_list.extend(groundtruth)
             pred_list.extend(cam)
