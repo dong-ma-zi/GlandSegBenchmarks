@@ -35,14 +35,15 @@ device = torch.device('cuda', args.gpu_device)
 
 
 
-def get_network(args, net, use_gpu=True, gpu_device = 0, distribution = True):
+def get_network(args, net, vit_mode, use_gpu=True, gpu_device = 0, distribution = True):
     """ return given network
     """
 
     if net == 'sam':
         from models.sam import SamPredictor, sam_model_registry
         # from models.sam.utils.transforms import ResizeLongestSide
-        net = sam_model_registry['vit_h'](args).to(device)
+        # net = sam_model_registry['vit_b'](args).to(device)
+        net = sam_model_registry[vit_mode](args).to(device)
         weight_dict = torch.load(args.sam_ckpt)
         load_weight_dict = {k: v for k, v in weight_dict.items() if
                             k in net.state_dict() and net.state_dict()[k].numel() == v.numel()}
@@ -730,35 +731,36 @@ def random_click(mask, point_labels = 1, inout = 1):
     return indices[np.random.randint(len(indices))]
 
 
-def generate_click_prompt_all_inst(img, msk):
+def generate_click_prompt_all_inst(msk):
     # return: prompt, prompt mask
-    # pt_list = []
-    # msk_list = []
-    b, h, w = msk.size()
+    h, w = msk.shape
+    pt_list = []
+    mask_list = []
 
-    pt_list_s = []
-    msk_list_s = []
-    for j in range(b):
-        msk_s = msk[j, :, :]
-        indices = torch.nonzero(msk_s)
-        if indices.size(0) == 0:
+    insts = np.unique(msk).tolist()
+    if 0 in insts:
+        insts.remove(0)
+
+    if len(insts) == 0:
+        # random_index = np.random.randint(0, h, size=(1, 2))
+        return np.random.randint(0, h, size=(1, 2)), msk[np.newaxis, ...]
+
+    for inst in insts:
+        msk_s = np.zeros_like(msk)
+        msk_s[msk == inst] = 1
+
+        indices = np.nonzero(msk_s)
+        if indices[0].size == 0:
             # generate a random array between [0-h, 0-h]:
-            random_index = torch.randint(0, h, (2,)).to(device=msk.device)
-            new_s = msk_s
+            random_index = np.random.randint(0, h, size=(1, 2))
         else:
-            random_index = random.choice(indices)
-            label = msk_s[random_index[0], random_index[1]]
-            # convert bool tensor to float
-            new_s = (msk_s == label).to(dtype = torch.float)
-        pt_list_s.append(random_index)
-        msk_list_s.append(new_s)
+            ind_choice = random.choices(range(indices[0].size))[0]
+            random_index = np.array([[indices[0][ind_choice], indices[1][ind_choice]]])
 
-    pts = torch.stack(pt_list_s, dim=0)
-    msks = torch.stack(msk_list_s, dim=0)
-    msk = msks.unsqueeze(1)
-    pts = pts.unsqueeze(1)
+        pt_list.append(random_index)
+        mask_list.append(msk_s[np.newaxis, ...])
 
-    return img, pts, msk # [b, 2, d], [b, c, h, w, d]
+    return np.concatenate(pt_list, axis=0), np.concatenate(mask_list, axis=0)
 
 def generate_click_prompt(img, msk):
     # return: prompt, prompt mask

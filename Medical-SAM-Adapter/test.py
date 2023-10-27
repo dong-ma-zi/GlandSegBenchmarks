@@ -1,38 +1,34 @@
-import glob
-import os
-import torch
-import torch.backends.cudnn as cudnn
 import torch.nn.functional as F
-import numpy as np
-from PIL import Image
 import skimage.morphology as morph
 from skimage.measure import label
 from skimage import measure, io
 import utils
 from metrics import dice_coefficient, iou_metrics
-import scipy.io as scio
+from transforms import ResizeLongestSide
 from scipy import ndimage
-import torchvision.transforms as transforms
+# import torchvision.transforms as transforms
 import argparse
 from multiprocessing import Array, Process
 from models.sam import SamPredictor, sam_model_registry
 import cv2
-import math
 from utils import *
 
 parser = argparse.ArgumentParser(description="Testing oeem segmentation Model")
 
 parser.add_argument('--save_dir', type=str, default='./experimentsP')
 
-parser.add_argument('--img_dir', type=str, default='/home/data1/my/Project/GlandSegBenchmark/OEEM/classification/glas_cls/2.validation/img')
-parser.add_argument('--label_dir', type=str, default='/home/data1/my/Project/GlandSegBenchmark/OEEM/classification/glas_cls/2.validation/mask')
+parser.add_argument('--img_dir', type=str, default='/home/data2/MedImg/GlandSeg/GlaS/test/Images')
+parser.add_argument('--label_dir', type=str, default='/home/data2/MedImg/GlandSeg/GlaS/test/Annotation')
+
+# parser.add_argument('--img_dir', type=str, default='/home/data1/my/Project/GlandSegBenchmark/OEEM/classification/glas_cls/2.validation/img')
+# parser.add_argument('--label_dir', type=str, default='/home/data1/my/Project/GlandSegBenchmark/OEEM/classification/glas_cls/2.validation/mask')
 
 # parser.add_argument('--img_dir', type=str, default='/home/data2/MedImg/NucleiSeg/MoNuSeg/Test/Images')
 # parser.add_argument('--label_dir', type=str, default='/home/data2/MedImg/NucleiSeg/MoNuSeg/Test/Annotation/')
 
 # parser.add_argument('--img_dir', type=str, default='/home/data2/MedImg/GlandSeg/GlaS/wzh/valid/480x480/Images/')
 # parser.add_argument('--label_dir', type=str, default='/home/data2/MedImg/GlandSeg/GlaS/wzh/valid/480x480/Annotation/')
-''
+
 parser.add_argument('--desc', type=str,
                     default='SAM-vit-h-Adapt',
 
@@ -40,25 +36,36 @@ parser.add_argument('--desc', type=str,
 
 parser.add_argument('--model_path', type=str,
                     # default="/home/data1/my/Project/GlandSegBenchmark/SAM/experimentsP3/GlaS_Vit-SAM-ft-all/checkpoints/checkpoint_100.pth.tar"
-                    default="/home/data1/my/Project/GlandSegBenchmark/Medical-SAM-Adapter/logs/sam-h_2023_10_17_15_03_56/Model/checkpoint_79"
+                    default="/home/data1/my/Project/GlandSegBenchmark/Medical-SAM-Adapter/logs/sam-h-1024-16-256_2023_10_25_14_22_04/Model/best_checkpoint_2"
                     )
 
 parser.add_argument('--dataset', type=str, choices=['GlaS', 'CRAG'], default='GlaS', help='which dataset be used')
-parser.add_argument('--gpu', type=list, default=[2, ], help='GPUs for training')
+parser.add_argument('--gpu', type=list, default=[1, ], help='GPUs for training')
 
 # 后处理参数
 parser.add_argument('--min_area', type=int, default=400, help='minimum area for an object')
-parser.add_argument('--radius', type=int, default=4)
+# parser.add_argument('--radius', type=int, default=4)
 args = parser.parse_args()
 
 
-def main():
-    # x = cv2.imread("/home/data1/my/dataset/consep/extracted_mirror/valid/256x256_256x256/Centers_1_1/test_10_001.png")[:, :, 0]
-    # kernel = np.ones((5, 5), np.uint8)
-    # y = cv2.dilate(x, kernel, iterations=1)
-    # cv2.imwrite('./check.png', y)
-    #
+def img_preprocessing(image, sam):
+    original_image_size = (image.shape[0], image.shape[1])
+    transform = ResizeLongestSide(sam.image_encoder.img_size)
+    input_image = transform.apply_image(np.array(image))
+    input_image = torch.as_tensor(input_image, dtype=torch.float32, device=sam.device) # set to float32
+    input_image = input_image.permute(2, 0, 1).contiguous()[None, :, :, :]
+    input_size = input_image.shape[-2:]
+    # input_image = sam.preprocess(input_image) # do not need padding here
+    return input_image, original_image_size, input_size
 
+def get_scaled_prompt(points, sam, original_image_size, if_transform: bool = True):
+    transform = ResizeLongestSide(sam.image_encoder.img_size)
+    points = transform.apply_coords(points, original_image_size) if if_transform else points
+    points = torch.as_tensor(points, device=sam.device).unsqueeze(1)
+    points = (points, torch.ones(points.shape[0], 1))
+    return points
+
+def main():
     os.environ['CUDA_VISIBLE_DEVICES'] = ','.join(str(x) for x in args.gpu)
 
     img_dir = args.img_dir
@@ -70,19 +77,6 @@ def main():
     # check if it is needed to compute accuracies
     eval_flag = True if label_dir else False
 
-    # data transforms
-    test_transform = transforms.Compose([transforms.ToTensor(),
-                                         # transforms.Normalize(mean=[0.787, 0.511, 0.785],
-                                         #                      std=[0.167, 0.248, 0.131])
-                                         ])
-
-    # ----- load trained model ----- #
-    # print("=> loading trained model")
-    # assert os.path.exists(model_path)
-    #
-    # checkpoint = torch.load(model_path)
-    # model.load_state_dict(checkpoint['state_dict'])
-    # # epoch = best_checkpoint['epoch']
     epoch = os.path.basename(model_path).split('.')[0].split('_')[-1]
     print("=> loaded model at epoch {}".format(epoch))
 
@@ -127,10 +121,8 @@ def main():
         image = Image.open(img_path).convert('RGB')
         image = np.array(image)
         h, w, _ = image.shape
-        label_path = '{:s}/{:s}.png'.format(label_dir, name)
-        label_img = io.imread(label_path)
-        label_img = cv2.cvtColor(label_img, cv2.COLOR_BGR2GRAY)
-        label_img = np.array(label_img == 76, dtype=np.uint8)
+        label_path = '{:s}/{:s}_anno.bmp'.format(label_dir, name)
+        label_img = np.array(Image.open(label_path))
 
         padding_h = int(math.ceil(h / stride) * stride)
         padding_w = int(math.ceil(w / stride) * stride)
@@ -144,23 +136,21 @@ def main():
                 t_h, t_w, _ = slice.shape
                 img_padding[:t_h, :t_w] = slice
 
-                img = test_transform(img_padding).unsqueeze(0).cuda()
+                label_padding = np.zeros((imgsize, imgsize), np.uint8)
+                slice = label_img[h_:h_ + imgsize, w_:w_ + imgsize]
+                t_h, t_w = slice.shape
+                label_padding[:t_h, :t_w] = slice
 
-                # --------------------- get prompt --------------------------#
-                msk_slice = label_img[h_:h_ + imgsize, w_:w_ + imgsize]
-                msk_slice = torch.tensor(msk_slice, dtype=torch.float32).unsqueeze(0).cuda()
-                _, ptw, _ = generate_click_prompt_all(img, msk_slice)
-                point_coords = ptw
-                labels_torch = torch.as_tensor(np.ones(shape=(point_coords.shape[0], point_coords.shape[1],)),
-                                               dtype=torch.int).cuda()
-                coords_torch = torch.as_tensor(point_coords, dtype=torch.float).cuda()
+                ''' preprocess '''
+                input_image, original_image_size, input_size = img_preprocessing(img_padding, model)
+                pts, masks = generate_click_prompt_all_inst(label_padding)
+                pt = get_scaled_prompt(pts, model, original_image_size)
+                # masks = torch.as_tensor(masks, dtype=torch.float32).cuda()
 
-                # coords_torch, labels_torch = coords_torch[None, :, :], labels_torch[None, :]
-                pt = (coords_torch, labels_torch)
+                ''' forward '''
                 # --------------------- get prompt --------------------------#
                 with torch.no_grad():
-                    imge= model.image_encoder(img)
-
+                    imge= model.image_encoder(input_image)
                     se, de = model.prompt_encoder(
                         points=pt,
                         # points=None,
@@ -176,27 +166,24 @@ def main():
                         multimask_output=False,
                     )
 
-                # output = model(img)
-                # output = F.softmax(output, dim=1).detach().cpu().numpy()
-                output = (output > 0.5).float().detach().cpu().numpy()
-                weight_mask = np.ones_like(output)
-                padding_output[:, :, h_:h_ + imgsize, w_:w_ + imgsize] += output
+                ''' postprocess '''
+                # msk
+                upscaled_masks = model.postprocess_masks(output, input_size, original_image_size).squeeze(1)
+                upscaled_masks = (upscaled_masks > 0.5).float().detach().cpu().numpy()
+
+                res_mask = np.zeros((imgsize, imgsize), np.uint8)
+                for i in range(upscaled_masks.shape[0]):
+                    res_mask[upscaled_masks[i] == 1] = 1
+
+                padding_output[:, :, h_:h_ + imgsize, w_:w_ + imgsize] += res_mask
+                # weight
+                weight_mask = np.ones_like(res_mask)
                 padding_weight_mask[:, :, h_:h_ + imgsize, w_:w_ + imgsize] += weight_mask
-                del output, img, img_padding, slice
+                # del output, img, img_padding, slice
 
         padding_output /= padding_weight_mask
         pred = padding_output[:, :, :h, :w]
-        # pred = np.argmax(output, axis=1)
         pred = pred[0][0].astype(int)
-
-        # h, w = orig_img.size
-        # img = Image.open(img_path)
-        # img = test_transform(img).unsqueeze(0).cuda()
-        # with torch.no_grad():
-        #     out = model(img)
-        #
-        # out = out.view(1, -1, w, h)
-        # pred = np.argmax(out[0].cpu().numpy(), axis=0)
 
 
         ############################### post proc ################################################
@@ -212,12 +199,10 @@ def main():
 
         if eval_flag:
 
-            label_path = '{:s}/{:s}.png'.format(label_dir, name)
-            label_img = io.imread(label_path)
-            label_img = cv2.cvtColor(label_img, cv2.COLOR_BGR2GRAY)
-            label_img = np.array(label_img == 76, dtype=np.uint8)
+
             # label_img = scio.loadmat('{:s}/{:s}.mat'.format(label_dir, name))['inst_map']
-            # label_img = np.array(label_img != 0, dtype=np.uint8)
+            label_img = cv2.imread('{:s}/{:s}_anno.bmp'.format(label_dir, name))[:, :, 0]
+            label_img = np.array(label_img != 0, dtype=np.uint8)
 
         if eval_flag:
             img_show = np.concatenate([np.array(orig_img),
@@ -318,15 +303,9 @@ def get_overall_valid_score(pred_image_path, groundtruth_path, num_workers=1, nu
         for im_name in image_list:
             cam = np.load(os.path.join(pred_image_path, f"{im_name}.npy"), allow_pickle=True).astype(np.uint8).reshape(-1)
 
-            # groundtruth = np.asarray(Image.open(groundtruth_path + f"/{im_name}_anno.bmp")).reshape(-1)
-            # groundtruth = np.asarray(Image.open(groundtruth_path + f"/{im_name}.png")).reshape(-1)
-
-            groundtruth = io.imread(groundtruth_path + f"/{im_name}.png")
-            groundtruth = cv2.cvtColor(groundtruth, cv2.COLOR_BGR2GRAY)
-            groundtruth = np.array(groundtruth == 76, dtype=np.uint8).reshape(-1)
-
+            groundtruth = np.asarray(Image.open(groundtruth_path + f"/{im_name}_anno.bmp")).reshape(-1)
             # groundtruth = scio.loadmat(groundtruth_path + f"/{im_name}.mat")['inst_map']
-            # groundtruth = np.array(groundtruth != 0, dtype=np.uint8).reshape(-1)
+            groundtruth = np.array(groundtruth != 0, dtype=np.uint8).reshape(-1)
 
             gt_list.extend(groundtruth)
             pred_list.extend(cam)

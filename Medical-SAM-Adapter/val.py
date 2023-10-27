@@ -5,30 +5,8 @@
     Junde Wu
 """
 
-import os
-import sys
-import argparse
-from datetime import datetime
-from collections import OrderedDict
-import numpy as np
-import torch
-import torch.nn as nn
-import torch.optim as optim
-from sklearn.metrics import roc_auc_score, accuracy_score,confusion_matrix
-import torchvision
 import torchvision.transforms as transforms
-from skimage import io
-from torch.utils.data import DataLoader
-#from dataset import *
-from torch.autograd import Variable
-from PIL import Image
-from tensorboardX import SummaryWriter
-#from models.discriminatorlayer import discriminator
 from dataset import *
-from conf import settings
-import time
-import cfg
-from tqdm import tqdm
 from torch.utils.data import DataLoader, random_split
 from utils import *
 import function
@@ -119,6 +97,6 @@ best_tol = 1e4
 
 if args.mod == 'sam_adpt':
     net.eval()
-    tol, (eiou, edice) = function.validation_sam(args, nice_test_loader, start_epoch, net)
-    logger.info(f'Total score: {tol}, IOU: {eiou}, DICE: {edice} || @ epoch {start_epoch}.')
+    tol, eacc, eiou = function.validation_sam(args, nice_test_loader, start_epoch, net)
+    logger.info(f'Total score: {tol}, ACC: {eacc}, IOU: {eiou} || @ epoch {start_epoch}.')
     
