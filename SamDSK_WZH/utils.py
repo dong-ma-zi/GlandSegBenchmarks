@@ -416,7 +416,7 @@ def draw_rand_inst_overlay(ori_img_, inst_map_, rand_color=True, draw_center=Fal
                 B = random.randint(0, 255)
                 color = [R, G, B]
             else:
-                color = [0, 255, 255]
+                color = [0, 255, 0]
 
             img = cv2.drawContours(img, contours, contour, color, 2, 8)
 

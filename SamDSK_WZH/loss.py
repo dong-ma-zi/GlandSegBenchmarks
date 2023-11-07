@@ -5,9 +5,31 @@ from PIL import Image
 import skimage.morphology as morph
 import cv2
 
+def cross_entropy_loss(true, pred, mask, reduction="mean"):
+    zero_pred = mask * pred[:, 0, :, :]
+    one_pred = mask * pred[:, 1, :, :]
+    true = mask * true
+    # ======================================================
+    epsilon = 10e-8
+    # manual computation of crossentropy
+    zero_pred = torch.clamp(zero_pred, epsilon, 1.0 - epsilon)
+    one_pred = torch.clamp(one_pred, epsilon, 1.0 - epsilon)
+    loss = -true * torch.log(one_pred) - (1-true) * torch.log(zero_pred)
+    loss *= mask
+    if reduction == 'mean':
+        loss = loss.sum() / mask.sum()
+    else:
+        loss = loss.sum()
+    # loss = loss.mean() if reduction == "mean" else loss.sum()
+    return loss
+
 ####
-def dice_loss(true, pred, smooth=1e-3):
+def dice_loss(true, pred, mask, smooth=1e-3):
     """`pred` and `true` must be of torch.float32. Assuming of shape NxHxWxC."""
+    # test = mask.detach().cpu().numpy()
+    pred = mask * pred
+    true = mask * true
+    # ======================================================
     inse = torch.sum(pred * true)
     l = torch.sum(pred)
     r = torch.sum(true)
@@ -19,13 +41,19 @@ def overlap(true, pred):
     return np.sum(true * pred)
     # return np.sum(np.where(true>0, 1, 0) * np.where(pred>0, 1, 0))
 
-def object_dice_losses(trues, preds):
+def object_dice_losses(trues, preds, masks):
     loss = torch.tensor(0.).cuda()
     for i in range(trues.size(0)):
-        loss += object_dice_loss(trues[i], preds[i])
+        # before_test = trues[i].detach().cpu().numpy()
+        # before_mask = masks[i].detach().cpu().numpy()
+        loss += object_dice_loss(trues[i], preds[i], masks[i])
     return loss
 
-def object_dice_loss(true, pred_ori):
+def object_dice_loss(true, pred_ori, mask):
+    pred_ori = mask * pred_ori
+    true = mask * true
+
+    # ======================================================
     pred = torch.gt(pred_ori, 0.5).int()
     pred = pred.detach().cpu().numpy()
 
@@ -80,7 +108,8 @@ def object_dice_loss(true, pred_ori):
         pred_map = torch.from_numpy(np.array(pred_inst == pred_prop.label, np.uint8)).cuda()
         true_map = torch.from_numpy(np.array(true_inst == true_props[predMatchMap[i]].label, np.uint8)).cuda()
         pred_slice = pred_ori * (pred == pred_map)
-        pred_loss += dice_loss(true_map, pred_slice) * torch.sum(pred_map) / torch.sum(pred)
+        mask = torch.ones_like(true_map).cuda()
+        pred_loss += dice_loss(true_map, pred_slice, mask) * torch.sum(pred_map) / torch.sum(pred)
 
     true_loss = torch.tensor(0.).cuda()
     true_all_slice = torch.gt(true, 0)
@@ -89,7 +118,8 @@ def object_dice_loss(true, pred_ori):
         pred_map = torch.from_numpy(np.array(pred_inst == pred_props[trueMatchMap[i]].label, np.uint8)).cuda()
         true_slice = (true == true_prop.label).float()
         pred_slice = pred_ori * (pred == pred_map)
-        true_loss += dice_loss(true_slice, pred_slice) * torch.sum(true_map) / torch.sum(true_all_slice)
+        mask = torch.ones_like(true_slice).cuda()
+        true_loss += dice_loss(true_slice, pred_slice, mask) * torch.sum(true_map) / torch.sum(true_all_slice)
     del true_map, pred_map, pred_slice, true_slice
     return (pred_loss + true_loss) / 2
 

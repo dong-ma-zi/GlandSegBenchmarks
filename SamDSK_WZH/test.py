@@ -25,17 +25,18 @@ parser = argparse.ArgumentParser(description='Test MedT')
 parser.add_argument('--cuda', default="on", type=str, help='switch on/off cuda option (default: off)')
 parser.add_argument('--modelname', default='swinUnet', type=str, help='type of model')
 
-parser.add_argument('--save_dir', type=str, default='./experiments/')
-parser.add_argument('--mask_save_dir', type=str, default='./experiments/GlaS_10labeled/Image_segmentation/')
-parser.add_argument('--prompt_save_dir', type=str, default='./experiments/GlaS_10labeled/BoxPrompt/')
-parser.add_argument('--overlay_save_dir', type=str, default='./experiments/GlaS_10labeled/overlay/')
-parser.add_argument('--img_dir', type=str, default='/home/data2/MedImg/GlandSeg/GlaS/test/Images')
-parser.add_argument('--label_dir', type=str, default='/home/data2/MedImg/GlandSeg/GlaS/test/Annotation')
+parser.add_argument('--save_dir', type=str, default='experiments/GlaS_10labeled_round2')
+parser.add_argument('--mask_save_dir', type=str, default='experiments/GlaS_10labeled_round2/Image_segmentation/')
+parser.add_argument('--inst_save_dir', type=str, default='experiments/GlaS_10labeled_round2/inst_pred/')
+parser.add_argument('--prompt_save_dir', type=str, default='experiments/GlaS_10labeled_round2/BoxPrompt/')
+parser.add_argument('--overlay_save_dir', type=str, default='experiments/GlaS_10labeled_round2/overlay/')
+parser.add_argument('--img_dir', type=str, default='/home/data2/MedImg/GlandSeg/GlaS/train/Images')
+parser.add_argument('--label_dir', type=str, default='/home/data2/MedImg/GlandSeg/GlaS/train/Annotation')
 parser.add_argument('--dataset', type=str, choices=['GlaS', 'CRAG'], default='GlaS', help='which dataset be used')
 
 
 parser.add_argument('--crop', type=int, default=None)
-parser.add_argument('--loaddirec', default='/home/data1/wzh/code/GlandSegBenchmarks/SamDSK_WZH/experiments/GlaS_10labeled/500/swinUnet.pth', type=str)
+parser.add_argument('--loaddirec', default='/home/data1/wzh/code/GlandSegBenchmarks/SamDSK_WZH/experiments/GlaS_10labeled_round2/500/swinUnet.pth', type=str)
 parser.add_argument('--imgsize', type=int, default=448)
 parser.add_argument('--gray', default='no', type=str)
 parser.add_argument('--device', default='cuda:3', type=str)
@@ -46,7 +47,6 @@ parser.add_argument('--aug', default='off', type=str, help='turn on img augmenta
 parser.add_argument('--min_area', type=int, default=100, help='minimum area for an object')
 parser.add_argument('--radius', type=int, default=4)
 args = parser.parse_args()
-
 
 gray_ = args.gray
 aug = args.aug
@@ -81,7 +81,7 @@ def main():
     print("=> Load trained model")
     # model.eval()
 
-    save_dir = "%s/%s/" % (args.save_dir, args.dataset)
+    save_dir = args.save_dir
     if not os.path.exists(save_dir):
         os.mkdir(save_dir)
 
@@ -91,6 +91,8 @@ def main():
         os.mkdir(args.overlay_save_dir)
     if not os.path.exists(args.prompt_save_dir):
         os.mkdir(args.prompt_save_dir)
+    if not os.path.exists(args.inst_save_dir):
+        os.mkdir(args.inst_save_dir)
 
     with torch.no_grad():
         validate(model, save_dir)
@@ -196,7 +198,10 @@ def validate(model, save_dir):
         pixel_accu = result[0]
 
         # single_image_result = gland_accuracy_object_level(pred_labeled, label_img)
-        objF1, _, _, _ = ObjectF1score(pred_labeled, label_img)
+        try:
+            objF1, _, _, _ = ObjectF1score(pred_labeled, label_img)
+        except:
+            continue
         objDice = ObjectDice(pred_labeled, label_img)
         dice = Dice(np.where(pred_labeled>0, 1, 0), np.where(label_img>0, 1, 0))
         objHaus = ObjectHausdorff(pred_labeled, label_img)
@@ -217,6 +222,8 @@ def validate(model, save_dir):
             ## draw overlay
             overlay = draw_rand_inst_overlay(image, pred_labeled)
             cv2.imwrite('{:s}/{:s}_seg.jpg'.format(args.overlay_save_dir, name), overlay)
+
+            np.save('{:s}/{:s}.npy'.format(args.inst_save_dir, name), pred_labeled)
 
 
         # 打印每张test的指标

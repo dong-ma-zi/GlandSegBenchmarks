@@ -26,10 +26,10 @@ parser.add_argument('--checkpoint', type=str, default=None, help='start from che
 parser.add_argument('--checkpoint_freq', type=int, default=10, help='epoch to save checkpoints')
 parser.add_argument('--epochs', type=int, default=100, help='number of epochs to train')
 parser.add_argument('--save_dir', type=str, default='./experimentsP')
-parser.add_argument('--img_dir', type=str, default='/home/data2/MedImg/GlandSeg/GlaS/test/Images')
-parser.add_argument('--label_dir', type=str, default='/home/data2/MedImg/GlandSeg/GlaS/test/Annotation')
+parser.add_argument('--img_dir', type=str, default='/home/data2/MedImg/GlandSeg/GlaS/train/Images')
+parser.add_argument('--label_dir', type=str, default='/home/data2/MedImg/GlandSeg/GlaS/train/Annotation')
 # parser.add_argument('--prompt_dir', type=str, default='/home/data2/MedImg/GlandSeg/GlaS/test/Prompts', help='.mat file, contain point and box prompt')
-parser.add_argument('--prompt_dir', type=str, default='/home/data1/wzh/code/GlandSegBenchmarks/SamDSK_WZH/experiments/GlaS_10labeled/BoxPrompt/', help='.mat file, contain point and box prompt')
+parser.add_argument('--prompt_dir', type=str, default='experiments/GlaS_10labeled/BoxPrompt/', help='.mat file, contain point and box prompt')
 
 parser.add_argument('--desc', type=str, default='SAM')
 
@@ -72,6 +72,9 @@ def main():
         prob_maps_folder = '{:s}/{:s}_{:s}_{:s}_{:s}/{:s}'.format(args.save_dir, args.dataset, args.desc, args.mode, args.prompt_mode, 'mask_pred')
         if not os.path.exists(prob_maps_folder):
             os.mkdir(prob_maps_folder)
+        inst_maps_folder = '{:s}/{:s}_{:s}_{:s}_{:s}/{:s}'.format(args.save_dir, args.dataset, args.desc, args.mode, args.prompt_mode, 'inst_pred')
+        if not os.path.exists(inst_maps_folder):
+            os.mkdir(inst_maps_folder)
         vis_maps_folder = '{:s}/{:s}_{:s}_{:s}_{:s}/{:s}'.format(args.save_dir, args.dataset, args.desc, args.mode, args.prompt_mode, 'vis_pred')
         if not os.path.exists(vis_maps_folder):
             os.mkdir(vis_maps_folder)
@@ -101,10 +104,18 @@ def main():
             masks = mask_generator.generate(img)
             height, width, _ = img.shape
             pred = np.zeros(shape=(height, width))
+            contour_map = img.copy()
             max_area = height * width
+            all_binary_maps = []
             for mask in masks:
-               if mask['area'] > 150000: continue
-               pred += mask['segmentation']
+                if mask['area'] > max_area * 0.5:
+                    continue
+                binary_map = np.array(mask['segmentation'], np.uint8)
+                all_binary_maps.append(binary_map)
+                contours, hierarchy = cv2.findContours(binary_map, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+                for contour in range(len(contours)):
+                    contour_map = cv2.drawContours(contour_map, contours, contour, (0, 255, 0), 2, 8)
+                pred += binary_map
 
         elif args.mode == 'prompt':
             # ============================= Prompt ===============================================#
@@ -161,8 +172,10 @@ def main():
                                        np.stack((pred * 255, pred * 255, pred * 255), axis=-1)],
                                        axis=1)
             cv2.imwrite('{:s}/{}.png'.format(vis_maps_folder, name), img_show)
+            cv2.imwrite('{:s}/{}_contour.png'.format(vis_maps_folder, name), contour_map)
 
             np.save('{:s}/{}.npy'.format(prob_maps_folder, name), pred)
+            np.save('{:s}/{}.npy'.format(inst_maps_folder, name), np.array(all_binary_maps))
             print('\tComputing metrics...')
             result = utils.accuracy_pixel_level(np.expand_dims(pred > 0, 0), np.expand_dims(label_img > 0, 0))
             pixel_accu = result[0]

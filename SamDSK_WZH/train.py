@@ -10,7 +10,7 @@ from dataloader import DataFolder
 import numpy as np
 import torch
 from my_transforms import get_transforms
-from loss import dice_loss, object_dice_losses
+from loss import dice_loss, object_dice_losses, cross_entropy_loss
 import utils
 from utils import accuracy_pixel_level
 from models.swin_unet import SwinUnet
@@ -22,22 +22,27 @@ parser.add_argument('--epochs', default=500, type=int, help='number of total epo
 parser.add_argument('--start-epoch', default=0, type=int, help='manual epoch number (useful on restarts)')
 parser.add_argument('--batch_size', default=4, type=int, help='batch size (default: 1)')
 ## GlaS 1e-4，这个非常重要，学习率轻微调整都对结果有很大影响, CRAG 5e-5；
-parser.add_argument('--learning_rate', default=5e-5, type=float, help='initial learning rate (default: 0.001)')
+parser.add_argument('--learning_rate', default=1e-4, type=float, help='initial learning rate (default: 0.001)')
 parser.add_argument('--momentum', default=0.9, type=float, help='momentum')
 parser.add_argument('--weight-decay', '--wd', default=1e-5, type=float, help='weight decay (default: 1e-5)')
 parser.add_argument('--save_freq', type=int,default = 50)
-parser.add_argument('--dataset', type=str, choices=['GlaS', 'CRAG'], default='CRAG', help='which dataset be used')
+parser.add_argument('--dataset', type=str, choices=['GlaS', 'CRAG'], default='GlaS', help='which dataset be used')
+
+parser.add_argument('--last_model_path', type=str, default="../MedT/swin_tiny_patch4_window7_224.pth")
+                    #default="/home/data1/wzh/code/GlandSegBenchmarks/SamDSK_WZH/experiments/GlaS_10labeled_round1/500/swinUnet.pth")
 
 parser.add_argument('--modelname', default='swinUnet', type=str, help='type of model')
 parser.add_argument('--cuda', default="on", type=str, help='switch on/off cuda option (default: on)')
 parser.add_argument('--aug', default='off', type=str, help='turn on img augmentation (default: False)')
 parser.add_argument('--load', default='default', type=str, help='load a pretrained model')
-parser.add_argument('--save_dir', type=str, default='./experiments/')
+parser.add_argument('--save_dir', type=str, default='experiments/')
+parser.add_argument('--refine_dir', type=str, default='experiments/GlaS_10labeled_round1/refine_inst_pred/')
 parser.add_argument('--crop', type=int, default=448)
 parser.add_argument('--imgsize', type=int, default=448)
 parser.add_argument('--gray', default='no', type=str)
 parser.add_argument('--device', default='cuda:3', type=str)
 parser.add_argument('--gpu', type=list, default=[3], help='GPUs for training')
+parser.add_argument('--round', type=int, default=2, help='number of round for self-training process')
 
 parser.add_argument('--gamma1', type=float, default=1, help='weight for dice loss')
 parser.add_argument('--gamma2', type=float, default=0.5, help='weight for object-level dice loss')
@@ -51,6 +56,10 @@ torch.cuda.set_device(args.device)
 
 def main():
     global logger
+
+    args.save_dir = "%s/%s_10labeled_round%s/" % (args.save_dir, args.dataset, args.round)
+    if not os.path.exists(args.save_dir):
+        os.makedirs(args.save_dir)
 
     if args.crop is not None:
         crop = (args.crop, args.crop)
@@ -102,15 +111,16 @@ def main():
         dir_list = [img_dir, target_dir]
         # post_fix = ['weight.png', 'label.png']
         if x == 'train':
-            dsets[x] = DataFolder(dir_list, data_transform=data_transforms[x], semi_rate=0.1)
+            dsets[x] = DataFolder(dir_list, args.refine_dir, data_transform=data_transforms[x],
+                                  dataset = args.dataset, semi_rate=0.1, round=args.round, mode = 'train')
         else:
-            dsets[x] = DataFolder(dir_list, data_transform=data_transforms[x])
+            dsets[x] = DataFolder(dir_list, args.refine_dir, data_transform=data_transforms[x],
+                                  dataset = args.dataset, mode = 'val')
     train_loader = DataLoader(dsets['train'], batch_size=args.batch_size, shuffle=True,
                               num_workers=args.num_workers)
     val_loader = DataLoader(dsets['val'], batch_size=1, shuffle=False,
                             num_workers=args.num_workers)
     ########################################################################
-
 
     # ----- create model ----- #
     device = torch.device(args.device)
@@ -119,7 +129,7 @@ def main():
 
     # ------ 加载预训练权重 ------ #
     # model.load_state_dict(torch.load("swin_tiny_patch4_window7_224.pth"))
-    model.load_from(args.device, logger, "../MedT/swin_tiny_patch4_window7_224.pth")
+    model.load_from(args.device, logger, args.last_model_path)
     logger.info("=> Loaded pretrained model weight!")
 
     if len(args.gpu) > 1:
@@ -153,7 +163,7 @@ def main():
             with torch.no_grad():
                 validate(val_loader, model, criterion)
 
-            save_dir = "%s/%s_10labeled/%d/" % (args.save_dir, args.dataset, epoch + 1)
+            save_dir = "%s/%d/" % (args.save_dir, epoch + 1)
             if not os.path.exists(save_dir):
                 os.mkdir(save_dir)
             torch.save(model.state_dict(), save_dir + args.modelname + ".pth")
@@ -162,18 +172,13 @@ def main():
 
 def setup_logging():
     mode = 'w'
-
-    save_dir = "%s/%s_10labeled/" % (args.save_dir, args.dataset)
-    if not os.path.exists(save_dir):
-        os.makedirs(save_dir)
-
     # create logger for training information
     logger = logging.getLogger('train_logger')
     logger.setLevel(logging.DEBUG)
     # create console handler and file handler
     console_handler = logging.StreamHandler()
     console_handler.setLevel(logging.INFO)
-    file_handler = logging.FileHandler('{:s}/train.log'.format(save_dir, mode=mode))
+    file_handler = logging.FileHandler('{:s}/train.log'.format(args.save_dir, mode=mode))
     file_handler.setLevel(logging.DEBUG)
     # create formatter
     formatter = logging.Formatter('%(asctime)s\t%(message)s', datefmt='%Y-%m-%d %I:%M')
@@ -187,12 +192,12 @@ def setup_logging():
     # create logger for epoch results
     logger_results = logging.getLogger('results')
     logger_results.setLevel(logging.DEBUG)
-    file_handler2 = logging.FileHandler('{:s}/epoch_results.txt'.format(save_dir), mode=mode)
+    file_handler2 = logging.FileHandler('{:s}/epoch_results.txt'.format(args.save_dir), mode=mode)
     file_handler2.setFormatter(logging.Formatter('%(message)s'))
     logger_results.addHandler(file_handler2)
 
     logger.info('***** Training starts *****')
-    logger.info('save directory: {:s}'.format(save_dir))
+    logger.info('save directory: {:s}'.format(args.save_dir))
     if mode == 'w':
         logger_results.info('epoch\ttrain_loss\ttrain_loss_CE\ttrain_loss_var\ttrain_acc\ttrain_iou\t'
                             'val_loss\tval_acc\tval_iou')
@@ -204,7 +209,14 @@ def train(train_loader, model, optimizer, criterion, epoch):
     results = utils.AverageMeter(6)
     for batch_idx, (imgs, labels, *rest) in enumerate(train_loader):
         imgs = Variable(imgs.to(device=args.device))
+        test = labels.numpy()
+        # if np.min(test) == -1:
+        #     print('ERROR')
         labels = Variable(labels.to(device=args.device))
+
+        ## 将不确定区域，label为-1的像素都置为0，不参与loss计算
+        mask = torch.eq(labels, -1).int().type(torch.LongTensor).to(args.device)
+        mask = 1 - mask
         seg_labels = torch.gt(labels, 0).int().type(torch.LongTensor)
         seg_labels = seg_labels.to(device=args.device)
 
@@ -219,11 +231,12 @@ def train(train_loader, model, optimizer, criterion, epoch):
 
         # compute dice loss
         score = F.softmax(output, dim=1)
-        loss_dice = dice_loss(seg_labels, score[:, 1, :, :])
+        loss_dice = dice_loss(seg_labels, score[:, 1, :, :], mask)
         # compute object-level dice loss
-        loss_obj_dice = object_dice_losses(labels, score[:, 1, :, :])
+        loss_obj_dice = object_dice_losses(labels, score[:, 1, :, :], mask)
         # compute ce loss
-        loss_ce = criterion(output, seg_labels)
+        #loss_ce = criterion(output, seg_labels)
+        loss_ce = cross_entropy_loss(seg_labels, score, mask)
         loss = loss_ce + args.gamma1 * loss_dice + args.gamma2 * loss_obj_dice
 
         result = [loss.item(),loss_ce.item(), loss_dice.item(), loss_obj_dice.item(), pixel_accu, iou]
@@ -265,6 +278,8 @@ def validate(val_loader, model, criterion):
 
         imgs = Variable(imgs.to(device=args.device))
         labels = Variable(labels.to(device=args.device))
+        mask = torch.eq(labels, -1).int().type(torch.LongTensor).to(args.device)
+        mask = 1 - mask
         seg_labels = torch.gt(labels, 0).int().type(torch.LongTensor)
         seg_labels = seg_labels.to(device=args.device)
         # start = timeit.default_timer()
@@ -280,11 +295,12 @@ def validate(val_loader, model, criterion):
 
         # compute dice loss
         score = F.softmax(output, dim=1)
-        loss_dice = dice_loss(seg_labels, score[:, 1, :, :])
+        loss_dice = dice_loss(seg_labels, score[:, 1, :, :], mask)
         # compute object-level dice loss
-        loss_obj_dice = object_dice_losses(labels, score[:, 1, :, :])
+        loss_obj_dice = object_dice_losses(labels, score[:, 1, :, :], mask)
         # compute ce loss
-        loss_ce = criterion(output, seg_labels)
+        #loss_ce = criterion(output, seg_labels)
+        loss_ce = cross_entropy_loss(seg_labels, score, mask)
         loss = loss_ce + args.gamma1 * loss_dice + args.gamma2 * loss_obj_dice
 
         result = [loss.item(), loss_ce.item(), loss_dice.item(), loss_obj_dice.item(), pixel_accu, iou]

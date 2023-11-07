@@ -201,8 +201,8 @@ class RandomCrop(object):
             4 is provided, it is used to pad left, top, right, bottom borders
             respectively.
     """
-
-    def __init__(self, size, padding=0, fill_val=(0,0)):
+    ## TODO 为了适配label -1,将fill_val改为1，即1表示背景，0表示未知
+    def __init__(self, size, padding=0, fill_val=(1,1)):
         if isinstance(size, numbers.Number):
             self.size = (int(size), int(size))
         else:
@@ -397,9 +397,10 @@ class RandomRotation(object):
 
         pics = []
         """ 源代码此处有bug， 所有图都用双线性插值， 实际对于label应该用最近邻插值 """
+        """ TODO 对label=0的部分进行填充，变成1，0表示label=-1"""
         # for img in imgs:
         pics.append(imgs[0].rotate(angle, self.resample, self.expand, self.center))
-        pics.append(imgs[1].rotate(angle, Image.NEAREST, self.expand, self.center))
+        pics.append(imgs[1].rotate(angle, Image.NEAREST, self.expand, self.center, fillcolor=1))
 
         # process the binary label
         # pics[1] = pics[1].point(lambda p: p > 127.5 and 255)
