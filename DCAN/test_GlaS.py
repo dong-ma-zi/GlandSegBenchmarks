@@ -6,10 +6,11 @@ import numpy as np
 from PIL import Image
 import skimage.morphology as morph
 from skimage import measure, io
-from models.deeplab import DCAN
+from deeplab import DCAN
 import utils
 from metrics import ObjectHausdorff, ObjectDice, ObjectF1score
 # from vis import draw_overlay_rand
+import cv2
 import torchvision.transforms as transforms
 import argparse
 
@@ -25,7 +26,7 @@ parser.add_argument('--img_dir', type=str, default='/home/data2/MedImg/GlandSeg/
 parser.add_argument('--label_dir', type=str, default='/home/data2/MedImg/GlandSeg/GlaS/test/Annotation')
 parser.add_argument('--model_path', type=str, default='/home/data1/wzh/code/GlandSegBenchmarks/DCAN/experiments/GlaS/300/checkpoints/checkpoint_300.pth.tar')
 parser.add_argument('--dataset', type=str, choices=['GlaS', 'CRAG'], default='GlaS', help='which dataset be used')
-parser.add_argument('--gpu', type=list, default=[3,], help='GPUs for training')
+parser.add_argument('--gpu', type=list, default=[0,], help='GPUs for training')
 
 # 后处理参数
 parser.add_argument('--min_area', type=int, default=100, help='minimum area for an object')
@@ -196,14 +197,14 @@ def main():
             #io.imsave('{:s}/{:s}_prob_inside.png'.format(prob_maps_folder, name), (prob_maps[1,:,:] * 255).astype(np.uint8))
             #io.imsave('{:s}/{:s}_prob_contour.png'.format(prob_maps_folder, name), (prob_maps[2,:,:] * 255).astype(np.uint8))
             # final_pred = Image.fromarray(pred_labeled.astype(np.uint16))
-            final_pred = Image.fromarray(pred_labeled.astype(np.uint8) * 100)
-            final_pred.save('{:s}/{:s}_seg.jpg'.format(seg_folder, name))
+            # final_pred = Image.fromarray(pred_labeled.astype(np.uint8) * 100)
+            # final_pred.save('{:s}/{:s}_seg.jpg'.format(seg_folder, name))
 
-            before_pred = Image.fromarray(pred_o.astype(np.uint8) * 255)
-            before_pred.save('{:s}/{:s}_seg.jpg'.format(before_contour_folder, name))
-
-            contour_pred = Image.fromarray(pred_c.astype(np.uint8) * 255)
-            contour_pred.save('{:s}/{:s}_seg.jpg'.format(seg_contour_folder, name))
+            # before_pred = Image.fromarray(pred_o.astype(np.uint8) * 255)
+            # before_pred.save('{:s}/{:s}_seg.jpg'.format(before_contour_folder, name))
+            #
+            # contour_pred = Image.fromarray(pred_c.astype(np.uint8) * 255)
+            # contour_pred.save('{:s}/{:s}_seg.jpg'.format(seg_contour_folder, name))
 
             # save colored objects
             # blank = np.ones(shape=(ori_h, 5, 3)) * 255
@@ -220,6 +221,14 @@ def main():
             # filename = '{:s}/{:s}_seg_concat.png'.format(seg_folder, name)
             # io.imsave(filename, (conbine_img).astype(np.uint8))
 
+            img_vis = np.array(img)
+            # label_vis = cv2.cvtColor(label_img.astype(np.uint8) * 10, cv2.COLOR_GRAY2RGB)
+            label_vis = draw_rand_inst_color(label_img)
+
+            # pred_vis = cv2.cvtColor(pred_labeled.astype(np.uint8) * 10, cv2.COLOR_GRAY2RGB)
+            pred_vis = draw_rand_inst_color(pred_labeled)
+            vis = np.concatenate([img_vis, label_vis, pred_vis], axis=1)
+            cv2.imwrite('{:s}/{:s}_seg.jpg'.format(seg_folder, name), vis)
         counter += 1
         if counter % 10 == 0:
             print('\tProcessed {:d} images'.format(counter))
@@ -269,6 +278,21 @@ def main():
         header = ['pixel_acc','recall', 'precision', 'F1', 'Dice', 'IoU', 'Hausdorff']
         save_results(header, avg_results, all_results,
                      '{:s}/{:s}_test_result_ck_epoch{}.txt'.format(save_dir, strs[-1], epoch))
+
+
+import random
+def draw_rand_inst_color(inst_map):
+    color_map = np.zeros(shape=(inst_map.shape[0], inst_map.shape[1], 3))
+
+    ind_list = np.unique(inst_map).tolist()
+    ind_list.remove(0)
+
+    for ind in ind_list:
+        R = random.randint(0, 255)
+        G = random.randint(0, 255)
+        B = random.randint(0, 255)
+        color_map[inst_map == ind, :] = [B, G, R]
+    return color_map
 
 
 def get_predmaps(input, model):

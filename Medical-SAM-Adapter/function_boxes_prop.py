@@ -11,7 +11,7 @@ import torch
 from transforms import ResizeLongestSide
 args = cfg.parse_args()
 
-# GPUdevice = torch.device('cuda', args.gpu_device)
+GPUdevice = torch.device('cuda', args.gpu_device)
 criterion_G = torch.nn.BCEWithLogitsLoss()
 torch.backends.cudnn.benchmark = True
 scaler = torch.cuda.amp.GradScaler()
@@ -21,12 +21,18 @@ global_step_best = 0
 epoch_loss_values = []
 metric_values = []
 
-def get_scaled_prompt(points, sam, original_image_size, if_transform: bool = True):
+
+def get_scaled_prompt(boxes, sam, original_image_size, if_transform: bool = True):
     transform = ResizeLongestSide(sam.image_encoder.img_size)
-    points = transform.apply_coords(points, original_image_size) if if_transform else points
-    points = torch.as_tensor(points).unsqueeze(1)
-    points = (points, torch.ones(points.shape[0], 1))
-    return points
+    # points = transform.apply_coords(points, original_image_size) if if_transform else points
+    # points = torch.as_tensor(points).unsqueeze(1)
+    # points = (points, torch.ones(points.shape[0], 1))
+
+    boxes = transform.apply_boxes(boxes, original_image_size) if if_transform else boxes
+    boxes = torch.as_tensor(boxes, device=sam.device)
+    return boxes
+
+
 
 def img_preprocessing(image, sam):
     original_image_size = (image.size[1], image.size[0])
@@ -38,6 +44,7 @@ def img_preprocessing(image, sam):
     input_image = sam.preprocess(input_image) # do not need padding here
     return input_image, original_image_size, input_size
 
+
 def train_sam(args, net: nn.Module, optimizer,
               train_img_list,
               train_anno_list,
@@ -46,7 +53,7 @@ def train_sam(args, net: nn.Module, optimizer,
 
     # train mode
     net.train()
-    points_batch_size = 8
+    boxes_batch_size = 8
     optimizer.zero_grad()
 
     # epoch_loss = 0
@@ -63,51 +70,42 @@ def train_sam(args, net: nn.Module, optimizer,
 
         for ind in index:
             img = Image.open(train_img_list[ind])
-            label = np.array(Image.open(train_anno_list[ind]))
-            # label = scio.loadmat(train_anno_list[ind])['inst_map']
+            # label = np.array(Image.open(train_anno_list[ind]))
+            label = scio.loadmat(train_anno_list[ind])['inst_map']
 
             ''' preprocess '''
             input_image, original_image_size, input_size = img_preprocessing(img, net)
-            pts_orig_scale, masks = generate_click_prompt_all_inst(label)
-            # pts_orig_scale, masks = generate_centroid_click_prompt_all_inst(label)
-            pts = get_scaled_prompt(pts_orig_scale, net, original_image_size)
+            boxes_orig_scale, masks = generate_boxes_prompt_all_inst(label)
+            boxes = get_scaled_prompt(boxes_orig_scale, net, original_image_size)
             masks = torch.as_tensor(masks, dtype=torch.float32)
-            # , device=GPUdevice)
 
             # with torch.cuda.amp.autocast(enabled=scaler is not None):
 
             # for i in range(pts[0].shape[0]): input pt prop with batch
-            point_num = pts[0].shape[0]
-            if point_num % points_batch_size == 0:
-                batch_num = point_num // points_batch_size
+            box_num =boxes.shape[0]
+            if box_num % boxes_batch_size == 0:
+                batch_num = box_num // boxes_batch_size
             else:
-                batch_num = point_num // points_batch_size + 1
+                batch_num = box_num // boxes_batch_size + 1
 
             for i in range(batch_num):
-                if i != (point_num // points_batch_size):
-                    single_pt = (pts[0][i * points_batch_size: (i + 1) * points_batch_size].to(GPUdevice),
-                                 pts[1][i * points_batch_size: (i + 1) * points_batch_size])
-                    batch_masks = masks[i * points_batch_size: (i + 1) * points_batch_size].to(GPUdevice)
-                else:
-                    single_pt = (pts[0][i * points_batch_size:].to(GPUdevice),
-                                 pts[1][i * points_batch_size:])
-                    batch_masks = masks[i * points_batch_size:].to(GPUdevice)
+                if i != (box_num // boxes_batch_size):
+                    single_boxes = boxes[i * boxes_batch_size: (i + 1) * boxes_batch_size].to(GPUdevice)
 
-                if single_pt[0].shape[0] == 0: print('no prompt input')
+                    batch_masks = masks[i * boxes_batch_size: (i + 1) * boxes_batch_size].to(GPUdevice)
+                else:
+                    single_boxes = boxes[i * boxes_batch_size:].to(GPUdevice)
+                    batch_masks = masks[i * boxes_batch_size:].to(GPUdevice)
+
+                if single_boxes[0].shape[0] == 0: print('no prompt input')
                 ''' forward '''
                 imge= net.image_encoder(input_image)
 
                 with torch.no_grad():
                     se, de = net.prompt_encoder(
-                        points= single_pt, # pts,
-                        boxes=None,
+                        points=None, # pts,
+                        boxes= single_boxes,
                         masks=None)
-
-
-                # se, de = net.prompt_encoder(
-                #     points= single_pt, # pts,
-                #     boxes=None,
-                #     masks=None)
 
                 pred, _ = net.mask_decoder(
                     image_embeddings=imge,
@@ -141,10 +139,11 @@ def train_sam(args, net: nn.Module, optimizer,
 
     return loss
 
+
 def validation_sam(args, net: nn.Module,
                    val_img_list,
                    val_anno_list):
-    points_batch_size = 8
+    boxes_batch_size = 8
 
     batch_tot, batch_acc, batch_iou = 0, 0, 0
     tot, tot_acc, tot_iou = 0, 0, 0
@@ -156,39 +155,39 @@ def validation_sam(args, net: nn.Module,
     with tqdm(total=len(index), desc='Validation round', unit='batch') as pbar:
         for ind in index:
             img = Image.open(val_img_list[ind])
-            label = np.array(Image.open(val_anno_list[ind]))
-            # label = scio.loadmat(val_anno_list[ind])['inst_map']
+            # label = np.array(Image.open(val_anno_list[ind]))
+            label = scio.loadmat(val_anno_list[ind])['inst_map']
 
             ''' preprocess '''
             input_image, original_image_size, input_size = img_preprocessing(img, net)
-            pts_orig_scale, masks = generate_click_prompt_all_inst(label)
-            pts = get_scaled_prompt(pts_orig_scale, net, original_image_size)
+            boxes_orig_scale, masks = generate_boxes_prompt_all_inst(label)
+            boxes = get_scaled_prompt(boxes_orig_scale, net, original_image_size)
             masks = torch.as_tensor(masks, dtype=torch.float32)
-            # , device=GPUdevice)
 
             # for i in range(pts[0].shape[0]): input pt prop with batch
-            point_num = pts[0].shape[0]
-            if point_num % points_batch_size == 0:
-                batch_num = point_num // points_batch_size
+            box_num =boxes.shape[0]
+            if box_num % boxes_batch_size == 0:
+                batch_num = box_num // boxes_batch_size
             else:
-                batch_num = point_num // points_batch_size + 1
+                batch_num = box_num // boxes_batch_size + 1
 
             for i in range(batch_num):
-                if i != (point_num // points_batch_size):
-                    single_pt = (pts[0][i * points_batch_size: (i + 1) * points_batch_size].to(GPUdevice),
-                                 pts[1][i * points_batch_size: (i + 1) * points_batch_size])
-                    batch_masks = masks[i * points_batch_size: (i + 1) * points_batch_size].to(GPUdevice)
+                if i != (box_num // boxes_batch_size):
+                    single_boxes = boxes[i * boxes_batch_size: (i + 1) * boxes_batch_size].to(GPUdevice)
+
+                    batch_masks = masks[i * boxes_batch_size: (i + 1) * boxes_batch_size].to(GPUdevice)
                 else:
-                    single_pt = (pts[0][i * points_batch_size:].to(GPUdevice),
-                                 pts[1][i * points_batch_size:])
-                    batch_masks = masks[i * points_batch_size:].to(GPUdevice)
+                    single_boxes = boxes[i * boxes_batch_size:].to(GPUdevice)
+                    batch_masks = masks[i * boxes_batch_size:].to(GPUdevice)
+
+                if single_boxes.shape[0] == 0: print('no prompt input')
 
                 '''test'''
                 with torch.no_grad():
                     imge= net.image_encoder(input_image)
                     se, de = net.prompt_encoder(
-                        points=single_pt,
-                        boxes=None,
+                        points=None,
+                        boxes=single_boxes,
                         masks=None,
                     )
 
@@ -218,7 +217,7 @@ def validation_sam(args, net: nn.Module,
             tot_acc += batch_acc / batch_num
             tot_iou += batch_iou / batch_num
             torch.cuda.empty_cache()
-            del input_image, pts
+            del input_image, boxes
             pbar.update()
 
     return tot/ len(index), tot_acc / len(index), tot_iou / len(index)

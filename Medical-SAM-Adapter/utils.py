@@ -10,8 +10,7 @@ from torch.autograd import Function
 import torchvision
 import torch.optim as optim
 import torchvision.utils as vutils
-from torch.autograd import Variable
-from torch import autograd
+import skimage.morphology as morph
 import random
 import collections
 import logging
@@ -28,42 +27,49 @@ from collections import OrderedDict
 import numpy as np
 from PIL import Image
 import torch
-from models.discriminator import Discriminator
+from scipy.spatial.distance import directed_hausdorff as hausdorff
+from scipy.optimize import linear_sum_assignment
 
 args = cfg.parse_args()
-device = torch.device('cuda', args.gpu_device)
+# device = torch.device('cuda', args.gpu_device)
 
 
 
-def get_network(args, net, vit_mode, use_gpu=True, gpu_device = 0, distribution = True):
+def get_network(args, net, vit_mode, gpu_device):
     """ return given network
     """
 
-    if net == 'sam':
-        from models.sam import SamPredictor, sam_model_registry
+    if net == 'sam_adpt':
+        from models.sam import sam_model_registry
         # from models.sam.utils.transforms import ResizeLongestSide
         # net = sam_model_registry['vit_b'](args).to(device)
-        net = sam_model_registry[vit_mode](args).to(device)
+        net = sam_model_registry[vit_mode](args).to(gpu_device)
         weight_dict = torch.load(args.sam_ckpt)
         load_weight_dict = {k: v for k, v in weight_dict.items() if
                             k in net.state_dict() and net.state_dict()[k].numel() == v.numel()}
         net.load_state_dict(load_weight_dict,
                             strict=False)
+    elif net == 'sam_orig':
+        from models.sam_orig import sam_model_registry
+        net = sam_model_registry[vit_mode](checkpoint=args.sam_ckpt).to(gpu_device)
+        # weight_dict = torch.load(args.sam_ckpt)
+        # load_weight_dict = {k: v for k, v in weight_dict.items() if
+        #                     k in net.state_dict() and net.state_dict()[k].numel() == v.numel()}
+        # net.load_state_dict(load_weight_dict,
+        #                     strict=False)
     else:
         print('the network name you have entered is not supported yet')
         sys.exit()
 
-    if use_gpu:
-        #net = net.cuda(device = gpu_device)
-        if distribution != 'none':
-            net = torch.nn.DataParallel(net,device_ids=[int(id) for id in args.distributed.split(',')])
-            net = net.to(device=gpu_device)
-        else:
-            net = net.to(device=gpu_device)
+    # if use_gpu:
+    #     # net = net.cuda(device = gpu_device)
+    #     if distribution != 'none':
+    #         net = torch.nn.DataParallel(net,device_ids=[int(id) for id in args.distributed.split(',')])
+    #         net = net.to(device=gpu_device)
+    #     else:
+    #         net = net.to(device=gpu_device)
 
     return net
-
-
 
 
 def cka_loss(gram_featureA, gram_featureB):
@@ -216,9 +222,10 @@ def set_log_dir(root_dir, exp_name):
     # set log path
     exp_path = os.path.join(root_dir, exp_name)
     now = datetime.now(dateutil.tz.tzlocal())
-    timestamp = now.strftime('%Y_%m_%d_%H_%M_%S')
+    # timestamp = now.strftime('%Y_%m_%d_%H_%M_%S')
+    timestamp = now.strftime('%Y_%m_%d_%H_%M')
     prefix = exp_path + '_' + timestamp
-    os.makedirs(prefix)
+    os.makedirs(prefix, exist_ok=True)
     path_dict['prefix'] = prefix
 
     # set checkpoint path
@@ -670,65 +677,31 @@ def init_D(m):
         nn.init.normal_(m.weight.data, 1.0, 0.02)
         nn.init.constant_(m.bias.data, 0)
 
-def pre_d():
-    netD = Discriminator(3).to(device)
-    # netD.apply(init_D)
-    beta1 = 0.5
-    dis_lr = 0.00002
-    optimizerD = optim.Adam(netD.parameters(), lr=dis_lr, betas=(beta1, 0.999))
-    return netD, optimizerD
-
-def update_d(args, netD, optimizerD, real, fake):
-    criterion = nn.BCELoss()
-
-    label = torch.full((args.b,), 1., dtype=torch.float, device=device)
-    output = netD(real).view(-1)
-    # Calculate loss on all-real batch
-    errD_real = criterion(output, label)
-    # Calculate gradients for D in backward pass
-    errD_real.backward()
-    D_x = output.mean().item()
-
-    label.fill_(0.)
-    # Classify all fake batch with D
-    output = netD(fake.detach()).view(-1)
-    # Calculate D's loss on the all-fake batch
-    errD_fake = criterion(output, label)
-    # Calculate the gradients for this batch, accumulated (summed) with previous gradients
-    errD_fake.backward()
-    D_G_z1 = output.mean().item()
-    # Compute error of D as sum over the fake and the real batches
-    errD = errD_real + errD_fake
-    # Update D
-    optimizerD.step()
-
-    return errD, D_x, D_G_z1
-
-def calculate_gradient_penalty(netD, real_images, fake_images):
-    eta = torch.FloatTensor(args.b,1,1,1).uniform_(0,1)
-    eta = eta.expand(args.b, real_images.size(1), real_images.size(2), real_images.size(3)).to(device = device)
-
-    interpolated = (eta * real_images + ((1 - eta) * fake_images)).to(device = device)
-
-    # define it to calculate gradient
-    interpolated = Variable(interpolated, requires_grad=True)
-
-    # calculate probability of interpolated examples
-    prob_interpolated = netD(interpolated)
-
-    # calculate gradients of probabilities with respect to examples
-    gradients = autograd.grad(outputs=prob_interpolated, inputs=interpolated,
-                            grad_outputs=torch.ones(
-                                prob_interpolated.size()).to(device = device),
-                            create_graph=True, retain_graph=True)[0]
-
-    grad_penalty = ((gradients.norm(2, dim=1) - 1) ** 2).mean() * 10
-    return grad_penalty
+# def calculate_gradient_penalty(netD, real_images, fake_images):
+#     eta = torch.FloatTensor(args.b,1,1,1).uniform_(0,1)
+#     eta = eta.expand(args.b, real_images.size(1), real_images.size(2), real_images.size(3)).to(device = device)
+#
+#     interpolated = (eta * real_images + ((1 - eta) * fake_images)).to(device = device)
+#
+#     # define it to calculate gradient
+#     interpolated = Variable(interpolated, requires_grad=True)
+#
+#     # calculate probability of interpolated examples
+#     prob_interpolated = netD(interpolated)
+#
+#     # calculate gradients of probabilities with respect to examples
+#     gradients = autograd.grad(outputs=prob_interpolated, inputs=interpolated,
+#                             grad_outputs=torch.ones(
+#                                 prob_interpolated.size()).to(device = device),
+#                             create_graph=True, retain_graph=True)[0]
+#
+#     grad_penalty = ((gradients.norm(2, dim=1) - 1) ** 2).mean() * 10
+#     return grad_penalty
 
 
-def random_click(mask, point_labels = 1, inout = 1):
-    indices = np.argwhere(mask == inout)
-    return indices[np.random.randint(len(indices))]
+# def random_click(mask, point_labels = 1, inout = 1):
+#     indices = np.argwhere(mask == inout)
+#     return indices[np.random.randint(len(indices))]
 
 
 def generate_click_prompt_all_inst(msk):
@@ -755,47 +728,109 @@ def generate_click_prompt_all_inst(msk):
             random_index = np.random.randint(0, h, size=(1, 2))
         else:
             ind_choice = random.choices(range(indices[0].size))[0]
-            random_index = np.array([[indices[0][ind_choice], indices[1][ind_choice]]])
+            # random_index = np.array([[indices[0][ind_choice], indices[1][ind_choice]]])
+            random_index = np.array([[indices[1][ind_choice], indices[0][ind_choice]]])
 
         pt_list.append(random_index)
         mask_list.append(msk_s[np.newaxis, ...])
 
     return np.concatenate(pt_list, axis=0), np.concatenate(mask_list, axis=0)
 
-def generate_click_prompt(img, msk):
+def generate_centroid_click_prompt_all_inst(msk):
     # return: prompt, prompt mask
-    # pt_list = []
-    # msk_list = []
-    b, h, w = msk.size()
+    h, w = msk.shape
+    pt_list = []
+    mask_list = []
 
-    pt_list_s = []
-    msk_list_s = []
-    for j in range(b):
-        msk_s = msk[j, :, :]
-        indices = torch.nonzero(msk_s)
-        if indices.size(0) == 0:
-            # generate a random array between [0-h, 0-h]:
-            random_index = torch.randint(0, h, (2,)).to(device = msk.device)
-            new_s = msk_s
-        else:
-            random_index = random.choice(indices)
-            label = msk_s[random_index[0], random_index[1]]
-            # convert bool tensor to float
-            new_s = (msk_s == label).to(dtype = torch.float)
-        pt_list_s.append(random_index)
-        msk_list_s.append(new_s)
+    insts = np.unique(msk).tolist()
+    if 0 in insts:
+        insts.remove(0)
 
-    pts = torch.stack(pt_list_s, dim=0)
-    msks = torch.stack(msk_list_s, dim=0)
-    # pt_list.append(pts)
-    # msk_list.append(msks)
-    # pt = torch.stack(pt_list, dim=-1)
-    # msk = torch.stack(msk_list, dim=-1)
-    msk = msks.unsqueeze(1)
-    pts = pts.unsqueeze(1)
+    if len(insts) == 0:
+        # random_index = np.random.randint(0, h, size=(1, 2))
+        return np.random.randint(0, h, size=(1, 2)), msk[np.newaxis, ...]
 
-    return img, pts, msk # [b, 2, d], [b, c, h, w, d]
+    for inst in insts:
+        msk_s = np.zeros_like(msk)
+        msk_s[msk == inst] = 1
 
+        indices = np.nonzero(msk_s)
+        minx = np.min(indices[0])
+        miny = np.min(indices[1])
+        maxx = np.max(indices[0])
+        maxy = np.max(indices[1])
+
+        # ind_choice = random.choices(range(indices[0].size))[0]
+        # centroid_index = np.array([[0.5 * (maxx + minx),
+        #                             0.5 * (miny + maxy)]])
+        centroid_index = np.array([[0.5 * (maxy + miny),
+                                    0.5 * (minx + maxx)]])
+
+        pt_list.append(centroid_index)
+        mask_list.append(msk_s[np.newaxis, ...])
+
+    return np.concatenate(pt_list, axis=0), np.concatenate(mask_list, axis=0)
+
+def generate_mask_prompt_all_inst(msk):
+    # return: prompt, prompt mask
+    h, w = msk.shape
+    pt_list = []
+    mask_list = []
+
+    insts = np.unique(msk).tolist()
+    if 0 in insts:
+        insts.remove(0)
+
+    if len(insts) == 0:
+        # random_index = np.random.randint(0, h, size=(1, 2))
+        return np.random.randint(0, h, size=(1, 2)), msk[np.newaxis, ...]
+
+    for inst in insts:
+        msk_s = np.zeros_like(msk)
+        msk_s[msk == inst] = 1
+
+
+        mask_list.append(msk_s[np.newaxis, ...])
+
+    return np.concatenate(pt_list, axis=0), np.concatenate(mask_list, axis=0)
+
+def generate_boxes_prompt_all_inst(msk):
+    # return: prompt, prompt mask
+    h, w = msk.shape
+    box_list = []
+    mask_list = []
+
+    insts = np.unique(msk).tolist()
+    if 0 in insts:
+        insts.remove(0)
+
+    # if len(insts) == 0:
+    #     # random_index = np.random.randint(0, h, size=(1, 2))
+    #     return np.random.randint(0, h, size=(1, 2)), msk[np.newaxis, ...]
+
+    for inst in insts:
+        msk_s = np.zeros_like(msk)
+        msk_s[msk == inst] = 1
+        indices = np.nonzero(msk_s)
+
+        minx = np.min(indices[0])
+        miny = np.min(indices[1])
+        maxx = np.max(indices[0])
+        maxy = np.max(indices[1])
+        # box_list += [np.array([minx, miny, maxx, maxy])[np.newaxis, :]]
+        box_list += [np.array([miny, minx, maxy, maxx])[np.newaxis, :]]
+
+        # if indices[0].size == 0:
+        #     # generate a random array between [0-h, 0-h]:
+        #     random_index = np.random.randint(0, h, size=(1, 2))
+        # else:
+        #     ind_choice = random.choices(range(indices[0].size))[0]
+        #     random_index = np.array([[indices[0][ind_choice], indices[1][ind_choice]]])
+
+        # box_list.append(random_index)
+        mask_list.append(msk_s[np.newaxis, ...])
+
+    return np.concatenate(box_list, axis=0), np.concatenate(mask_list, axis=0)
 
 def compute_pixel_level_metrics(pred, target):
     """ Compute the pixel-level tp, fp, tn, fn between
@@ -838,3 +873,403 @@ def accuracy_pixel_level(output, target):
         results += np.array(metrics_inside)
 
     return [value/batch_size for value in results]
+
+
+def gland_accuracy_object_level_all_images(pred, gt):
+    """ Compute the object-level metrics between predicted and
+    groundtruth """
+
+    if not isinstance(pred, np.ndarray):
+        pred = np.array(pred)
+    if not isinstance(gt, np.ndarray):
+        gt = np.array(gt)
+
+    # get connected components
+    pred_labeled = morph.label(pred, connectivity=2)
+    Ns = len(np.unique(pred_labeled)) - 1
+    gt_labeled = morph.label(gt, connectivity=2)
+    gt_labeled = morph.remove_small_objects(gt_labeled, 3)   # remove 1 or 2 pixel noise in the image
+    gt_labeled = morph.label(gt_labeled, connectivity=2)
+    Ng = len(np.unique(gt_labeled)) - 1
+
+    # show_figures((pred_labeled, gt_labeled))
+
+    # --- compute F1 --- #
+    TP = 0.0  # true positive
+    FP = 0.0  # false positive
+    for i in range(1, Ns + 1):
+        pred_i = np.where(pred_labeled == i, 1, 0)
+        img_and = np.logical_and(gt_labeled, pred_i)
+
+        # get intersection objects in target
+        overlap_parts = img_and * gt_labeled
+        obj_no = np.unique(overlap_parts)
+        obj_no = obj_no[obj_no != 0]
+
+        # show_figures((img_i, overlap_parts))
+
+        # no intersection object
+        if obj_no.size == 0:
+            FP += 1
+            continue
+
+        # find max overlap object
+        obj_areas = [np.sum(overlap_parts == k) for k in obj_no]
+        gt_obj = obj_no[np.argmax(obj_areas)]  # ground truth object number
+
+        gt_obj_area = np.sum(gt_labeled == gt_obj)  # ground truth object area
+        overlap_area = np.sum(overlap_parts == gt_obj)
+
+        if float(overlap_area) / gt_obj_area >= 0.5:
+            TP += 1
+        else:
+            FP += 1
+
+    FN = Ng - TP  # false negative
+
+    # --- compute dice, iou, hausdorff --- #
+    pred_objs_area = np.sum(pred_labeled>0)  # total area of objects in image
+    gt_objs_area = np.sum(gt_labeled>0)  # total area of objects in groundtruth gt
+
+    # compute how well groundtruth object overlaps its segmented object
+    dice_g = 0.0
+    iou_g = 0.0
+    hausdorff_g = 0.0
+    for i in range(1, Ng + 1):
+        gt_i = np.where(gt_labeled == i, 1, 0)
+        overlap_parts = gt_i * pred_labeled
+
+        # get intersection objects numbers in image
+        obj_no = np.unique(overlap_parts)
+        obj_no = obj_no[obj_no != 0]
+
+        # show_figures((pred_labeled, gt_i, overlap_parts))
+
+        if obj_no.size == 0:   # no intersection object
+            dice_i = 0
+            iou_i = 0
+
+            # find nearest segmented object in hausdorff distance
+            min_haus = 1e5
+            for j in range(1, Ns + 1):
+                pred_j = np.where(pred_labeled == j, 1, 0)
+                seg_ind = np.argwhere(pred_j)
+                gt_ind = np.argwhere(gt_i)
+                haus_tmp = max(hausdorff(seg_ind, gt_ind)[0], hausdorff(gt_ind, seg_ind)[0])
+
+                if haus_tmp < min_haus:
+                    min_haus = haus_tmp
+            haus_i = min_haus
+        else:
+            # find max overlap object
+            obj_areas = [np.sum(overlap_parts == k) for k in obj_no]
+            seg_obj = obj_no[np.argmax(obj_areas)]  # segmented object number
+            pred_i = np.where(pred_labeled == seg_obj, 1, 0)  # segmented object
+
+            overlap_area = np.max(obj_areas)  # overlap area
+
+            dice_i = 2 * float(overlap_area) / (np.sum(pred_i) + np.sum(gt_i))
+            iou_i = float(overlap_area) / (np.sum(pred_i) + np.sum(gt_i) - overlap_area)
+
+            # compute hausdorff distance
+            seg_ind = np.argwhere(pred_i)
+            gt_ind = np.argwhere(gt_i)
+            haus_i = max(hausdorff(seg_ind, gt_ind)[0], hausdorff(gt_ind, seg_ind)[0])
+
+        dice_g += np.sum(gt_i) * dice_i
+        iou_g += np.sum(gt_i) * iou_i
+        hausdorff_g += np.sum(gt_i) * haus_i
+
+    # compute how well segmented object overlaps its groundtruth object
+    dice_s = 0.0
+    iou_s = 0.0
+    hausdorff_s = 0.0
+    for j in range(1, Ns + 1):
+        pred_j = np.where(pred_labeled == j, 1, 0)
+        overlap_parts = pred_j * gt_labeled
+
+        # get intersection objects number in gt
+        obj_no = np.unique(overlap_parts)
+        obj_no = obj_no[obj_no != 0]
+
+        # show_figures((pred_j, gt_labeled, overlap_parts))
+
+        # no intersection object
+        if obj_no.size == 0:
+            dice_j = 0
+            iou_j = 0
+
+            # find nearest groundtruth object in hausdorff distance
+            min_haus = 1e5
+            for i in range(1, Ng + 1):
+                gt_i = np.where(gt_labeled == i, 1, 0)
+                seg_ind = np.argwhere(pred_j)
+                gt_ind = np.argwhere(gt_i)
+                haus_tmp = max(hausdorff(seg_ind, gt_ind)[0], hausdorff(gt_ind, seg_ind)[0])
+
+                if haus_tmp < min_haus:
+                    min_haus = haus_tmp
+            haus_j = min_haus
+        else:
+            # find max overlap gt
+            gt_areas = [np.sum(overlap_parts == k) for k in obj_no]
+            gt_obj = obj_no[np.argmax(gt_areas)]  # groundtruth object number
+            gt_j = np.where(gt_labeled == gt_obj, 1, 0)  # groundtruth object
+
+            overlap_area = np.max(gt_areas)  # overlap area
+
+            dice_j = 2 * float(overlap_area) / (np.sum(pred_j) + np.sum(gt_j))
+            iou_j = float(overlap_area) / (np.sum(pred_j) + np.sum(gt_j) - overlap_area)
+
+            # compute hausdorff distance
+            seg_ind = np.argwhere(pred_j)
+            gt_ind = np.argwhere(gt_j)
+            haus_j = max(hausdorff(seg_ind, gt_ind)[0], hausdorff(gt_ind, seg_ind)[0])
+
+        dice_s += np.sum(pred_j) * dice_j
+        iou_s += np.sum(pred_j) * iou_j
+        hausdorff_s += np.sum(pred_j) * haus_j
+
+    return TP, FP, FN, dice_g, dice_s, iou_g, iou_s, hausdorff_g, hausdorff_s, \
+           gt_objs_area, pred_objs_area
+
+def remap_label(pred, by_size=False):
+    """Rename all instance id so that the id is contiguous i.e [0, 1, 2, 3]
+    not [0, 2, 4, 6]. The ordering of instances (which one comes first)
+    is preserved unless by_size=True, then the instances will be reordered
+    so that bigger nucler has smaller ID.
+
+    Args:
+        pred    : the 2d array contain instances where each instances is marked
+                  by non-zero integer
+        by_size : renaming with larger nuclei has smaller id (on-top)
+
+    """
+    pred_id = list(np.unique(pred))
+    pred_id.remove(0)
+    if len(pred_id) == 0:
+        return pred  # no label
+    if by_size:
+        pred_size = []
+        for inst_id in pred_id:
+            size = (pred == inst_id).sum()
+            pred_size.append(size)
+        # sort the id by size in descending order
+        pair_list = zip(pred_id, pred_size)
+        pair_list = sorted(pair_list, key=lambda x: x[1], reverse=True)
+        pred_id, pred_size = zip(*pair_list)
+
+    new_pred = np.zeros(pred.shape, np.int32)
+    for idx, inst_id in enumerate(pred_id):
+        new_pred[pred == inst_id] = idx + 1
+    return new_pred
+
+def get_fast_aji(true, pred):
+    """AJI version distributed by MoNuSeg, has no permutation problem but suffered from
+    over-penalisation similar to DICE2.
+
+    Fast computation requires instance IDs are in contiguous orderding i.e [1, 2, 3, 4]
+    not [2, 3, 6, 10]. Please call `remap_label` before hand and `by_size` flag has no
+    effect on the result.
+
+    """
+    true = np.copy(true)  # ? do we need this
+    pred = np.copy(pred)
+    true_id_list = list(np.unique(true))
+    pred_id_list = list(np.unique(pred))
+
+    true_masks = [
+        None,
+    ]
+    for t in true_id_list[1:]:
+        t_mask = np.array(true == t, np.uint8)
+        true_masks.append(t_mask)
+
+    pred_masks = [
+        None,
+    ]
+    for p in pred_id_list[1:]:
+        p_mask = np.array(pred == p, np.uint8)
+        pred_masks.append(p_mask)
+
+    # prefill with value
+    pairwise_inter = np.zeros(
+        [len(true_id_list) - 1, len(pred_id_list) - 1], dtype=np.float64
+    )
+    pairwise_union = np.zeros(
+        [len(true_id_list) - 1, len(pred_id_list) - 1], dtype=np.float64
+    )
+
+    # caching pairwise
+    for true_id in true_id_list[1:]:  # 0-th is background
+        t_mask = true_masks[true_id]
+        pred_true_overlap = pred[t_mask > 0]
+        pred_true_overlap_id = np.unique(pred_true_overlap)
+        pred_true_overlap_id = list(pred_true_overlap_id)
+        for pred_id in pred_true_overlap_id:
+            if pred_id == 0:  # ignore
+                continue  # overlaping background
+            p_mask = pred_masks[pred_id]
+            total = (t_mask + p_mask).sum()
+            inter = (t_mask * p_mask).sum()
+            pairwise_inter[true_id - 1, pred_id - 1] = inter
+            pairwise_union[true_id - 1, pred_id - 1] = total - inter
+
+    pairwise_iou = pairwise_inter / (pairwise_union + 1.0e-6)
+    # pair of pred that give highest iou for each true, dont care
+    # about reusing pred instance multiple times
+    paired_pred = np.argmax(pairwise_iou, axis=1)
+    pairwise_iou = np.max(pairwise_iou, axis=1)
+    # exlude those dont have intersection
+    paired_true = np.nonzero(pairwise_iou > 0.0)[0]
+    paired_pred = paired_pred[paired_true]
+    # print(paired_true.shape, paired_pred.shape)
+    overall_inter = (pairwise_inter[paired_true, paired_pred]).sum()
+    overall_union = (pairwise_union[paired_true, paired_pred]).sum()
+
+    paired_true = list(paired_true + 1)  # index to instance ID
+    paired_pred = list(paired_pred + 1)
+    # add all unpaired GT and Prediction into the union
+    unpaired_true = np.array(
+        [idx for idx in true_id_list[1:] if idx not in paired_true]
+    )
+    unpaired_pred = np.array(
+        [idx for idx in pred_id_list[1:] if idx not in paired_pred]
+    )
+    for true_id in unpaired_true:
+        overall_union += true_masks[true_id].sum()
+    for pred_id in unpaired_pred:
+        overall_union += pred_masks[pred_id].sum()
+
+    aji_score = overall_inter / overall_union
+    return aji_score
+
+
+def get_fast_pq(true, pred, match_iou=0.5):
+    """`match_iou` is the IoU threshold level to determine the pairing between
+    GT instances `p` and prediction instances `g`. `p` and `g` is a pair
+    if IoU > `match_iou`. However, pair of `p` and `g` must be unique
+    (1 prediction instance to 1 GT instance mapping).
+
+    If `match_iou` < 0.5, Munkres assignment (solving minimum weight matching
+    in bipartite graphs) is caculated to find the maximal amount of unique pairing.
+
+    If `match_iou` >= 0.5, all IoU(p,g) > 0.5 pairing is proven to be unique and
+    the number of pairs is also maximal.
+
+    Fast computation requires instance IDs are in contiguous orderding
+    i.e [1, 2, 3, 4] not [2, 3, 6, 10]. Please call `remap_label` beforehand
+    and `by_size` flag has no effect on the result.
+
+    Returns:
+        [dq, sq, pq]: measurement statistic
+
+        [paired_true, paired_pred, unpaired_true, unpaired_pred]:
+                      pairing information to perform measurement
+
+    """
+    assert match_iou >= 0.0, "Cant' be negative"
+
+    true = np.copy(true)
+    pred = np.copy(pred)
+    true_id_list = list(np.unique(true))
+    pred_id_list = list(np.unique(pred))
+
+    true_masks = [
+        None,
+    ]
+    for t in true_id_list[1:]:
+        t_mask = np.array(true == t, np.uint8)
+        true_masks.append(t_mask)
+
+    pred_masks = [
+        None,
+    ]
+    for p in pred_id_list[1:]:
+        p_mask = np.array(pred == p, np.uint8)
+        pred_masks.append(p_mask)
+
+    # prefill with value
+    pairwise_iou = np.zeros(
+        [len(true_id_list) - 1, len(pred_id_list) - 1], dtype=np.float64
+    )
+
+    # caching pairwise iou
+    for true_id in true_id_list[1:]:  # 0-th is background
+        t_mask = true_masks[true_id]
+        pred_true_overlap = pred[t_mask > 0]
+        pred_true_overlap_id = np.unique(pred_true_overlap)
+        pred_true_overlap_id = list(pred_true_overlap_id)
+        for pred_id in pred_true_overlap_id:
+            if pred_id == 0:  # ignore
+                continue  # overlaping background
+            p_mask = pred_masks[pred_id]
+            total = (t_mask + p_mask).sum()
+            inter = (t_mask * p_mask).sum()
+            iou = inter / (total - inter)
+            pairwise_iou[true_id - 1, pred_id - 1] = iou
+    #
+    if match_iou >= 0.5:
+        paired_iou = pairwise_iou[pairwise_iou > match_iou]
+        pairwise_iou[pairwise_iou <= match_iou] = 0.0
+        paired_true, paired_pred = np.nonzero(pairwise_iou)
+        paired_iou = pairwise_iou[paired_true, paired_pred]
+        paired_true += 1  # index is instance id - 1
+        paired_pred += 1  # hence return back to original
+    else:  # * Exhaustive maximal unique pairing
+        #### Munkres pairing with scipy library
+        # the algorithm return (row indices, matched column indices)
+        # if there is multiple same cost in a row, index of first occurence
+        # is return, thus the unique pairing is ensure
+        # inverse pair to get high IoU as minimum
+        paired_true, paired_pred = linear_sum_assignment(-pairwise_iou)
+        ### extract the paired cost and remove invalid pair
+        paired_iou = pairwise_iou[paired_true, paired_pred]
+
+        # now select those above threshold level
+        # paired with iou = 0.0 i.e no intersection => FP or FN
+        paired_true = list(paired_true[paired_iou > match_iou] + 1)
+        paired_pred = list(paired_pred[paired_iou > match_iou] + 1)
+        paired_iou = paired_iou[paired_iou > match_iou]
+
+    # get the actual FP and FN
+    unpaired_true = [idx for idx in true_id_list[1:] if idx not in paired_true]
+    unpaired_pred = [idx for idx in pred_id_list[1:] if idx not in paired_pred]
+    # print(paired_iou.shape, paired_true.shape, len(unpaired_true), len(unpaired_pred))
+
+    #
+    tp = len(paired_true)
+    fp = len(unpaired_pred)
+    fn = len(unpaired_true)
+    # get the F1-score i.e DQ
+    dq = tp / (tp + 0.5 * fp + 0.5 * fn)
+    # get the SQ, no paired has 0 iou so not impact
+    sq = paired_iou.sum() / (tp + 1.0e-6)
+
+    return [dq, sq, dq * sq], [paired_true, paired_pred, unpaired_true, unpaired_pred]
+
+import cv2
+def non_max_suppression(mask_list, score, nms_thresh):
+    # 存储最终保留的掩码
+    # selected_masks = []
+
+    box_list = []
+    for mask in mask_list:
+        point_list = np.nonzero(mask)
+        if point_list[0].size == 0:
+            box_list += [np.array([[0, 0, 1, 1]])]
+            continue
+        minx = np.min(point_list[1])
+        maxx = np.max(point_list[1])
+        miny = np.min(point_list[0])
+        maxy = np.max(point_list[0])
+        box_list += [np.array([[minx, miny, maxx, maxy]])]
+    box_list = np.concatenate(box_list, axis=0)
+    predict_boxes_list = torch.from_numpy(box_list).type(torch.float32)
+    # area = (predict_boxes_list[:, 3] - predict_boxes_list[:, 1]) * (
+    #             predict_boxes_list[:, 2] - predict_boxes_list[:, 0])
+    # idxs = torchvision.ops.nms(predict_boxes_list, area / area.max(), nms_thresh)
+    idxs = torchvision.ops.nms(predict_boxes_list, score, nms_thresh)
+
+    # return mask_list[idxs.numpy()]
+    return [mask_list[i] for i in idxs.numpy()]

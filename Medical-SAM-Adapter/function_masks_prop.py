@@ -11,7 +11,7 @@ import torch
 from transforms import ResizeLongestSide
 args = cfg.parse_args()
 
-# GPUdevice = torch.device('cuda', args.gpu_device)
+GPUdevice = torch.device('cuda', args.gpu_device)
 criterion_G = torch.nn.BCEWithLogitsLoss()
 torch.backends.cudnn.benchmark = True
 scaler = torch.cuda.amp.GradScaler()
@@ -21,12 +21,14 @@ global_step_best = 0
 epoch_loss_values = []
 metric_values = []
 
+
 def get_scaled_prompt(points, sam, original_image_size, if_transform: bool = True):
     transform = ResizeLongestSide(sam.image_encoder.img_size)
     points = transform.apply_coords(points, original_image_size) if if_transform else points
     points = torch.as_tensor(points).unsqueeze(1)
     points = (points, torch.ones(points.shape[0], 1))
     return points
+
 
 def img_preprocessing(image, sam):
     original_image_size = (image.size[1], image.size[0])
@@ -38,6 +40,7 @@ def img_preprocessing(image, sam):
     input_image = sam.preprocess(input_image) # do not need padding here
     return input_image, original_image_size, input_size
 
+
 def train_sam(args, net: nn.Module, optimizer,
               train_img_list,
               train_anno_list,
@@ -46,7 +49,7 @@ def train_sam(args, net: nn.Module, optimizer,
 
     # train mode
     net.train()
-    points_batch_size = 8
+    points_batch_size = 2
     optimizer.zero_grad()
 
     # epoch_loss = 0
@@ -63,13 +66,12 @@ def train_sam(args, net: nn.Module, optimizer,
 
         for ind in index:
             img = Image.open(train_img_list[ind])
-            label = np.array(Image.open(train_anno_list[ind]))
-            # label = scio.loadmat(train_anno_list[ind])['inst_map']
+            # label = np.array(Image.open(train_anno_list[ind]))
+            label = scio.loadmat(train_anno_list[ind])['inst_map']
 
             ''' preprocess '''
             input_image, original_image_size, input_size = img_preprocessing(img, net)
             pts_orig_scale, masks = generate_click_prompt_all_inst(label)
-            # pts_orig_scale, masks = generate_centroid_click_prompt_all_inst(label)
             pts = get_scaled_prompt(pts_orig_scale, net, original_image_size)
             masks = torch.as_tensor(masks, dtype=torch.float32)
             # , device=GPUdevice)
@@ -103,12 +105,6 @@ def train_sam(args, net: nn.Module, optimizer,
                         boxes=None,
                         masks=None)
 
-
-                # se, de = net.prompt_encoder(
-                #     points= single_pt, # pts,
-                #     boxes=None,
-                #     masks=None)
-
                 pred, _ = net.mask_decoder(
                     image_embeddings=imge,
                     image_pe=net.prompt_encoder.get_dense_pe(),
@@ -141,6 +137,7 @@ def train_sam(args, net: nn.Module, optimizer,
 
     return loss
 
+
 def validation_sam(args, net: nn.Module,
                    val_img_list,
                    val_anno_list):
@@ -156,8 +153,8 @@ def validation_sam(args, net: nn.Module,
     with tqdm(total=len(index), desc='Validation round', unit='batch') as pbar:
         for ind in index:
             img = Image.open(val_img_list[ind])
-            label = np.array(Image.open(val_anno_list[ind]))
-            # label = scio.loadmat(val_anno_list[ind])['inst_map']
+            # label = np.array(Image.open(val_anno_list[ind]))
+            label = scio.loadmat(val_anno_list[ind])['inst_map']
 
             ''' preprocess '''
             input_image, original_image_size, input_size = img_preprocessing(img, net)

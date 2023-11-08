@@ -12,6 +12,7 @@
     <option name="namespacePackageFolders">
       <list>
         <option value="$MODULE_DIR$/cerberus/post_proc_wqh" />
+        <option value="$MODULE_DIR$/Medical-SAM-Adapter/models/sam_orig" />
       </list>
     </option>
   </component>

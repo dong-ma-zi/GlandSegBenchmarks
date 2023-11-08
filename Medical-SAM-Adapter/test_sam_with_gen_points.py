@@ -1,86 +1,129 @@
-import torch
-import torch.backends.cudnn as cudnn
+"""
+func: script for SAM testing with generated points
+author: my
+last modified: 2023/11/2
+"""
+import numpy as np
 import torch.nn.functional as F
 import skimage.morphology as morph
 from skimage.measure import label
+from skimage import measure, io
 import utils
-from metrics import iou_metrics
-import scipy.io as scio
+from metrics import dice_coefficient, iou_metrics
+from transforms import ResizeLongestSide
 from scipy import ndimage
-import torchvision.transforms as transforms
-from multiprocessing import Array, Process
-import random
-import cv2
-from segment_anything import sam_model_registry, SamPredictor
-from segment_anything import build_sam, SamAutomaticMaskGenerator
-import os
-from PIL import Image
-import numpy as np
+# import torchvision.transforms as transforms
 import argparse
+from multiprocessing import Array, Process
+# from models.sam_orig import SamPredictor, sam_model_registry
+from models.sam import SamPredictor, sam_model_registry
+import cv2
+from utils import *
+import scipy.io as scio
 
 parser = argparse.ArgumentParser(description="Testing oeem segmentation Model")
-parser.add_argument('--save_dir', type=str, default='./experimentsP3')
+
+parser.add_argument('--save_dir', type=str, default='./experimentsP2')
+
+# parser.add_argument('--img_dir', type=str, default='/home/data2/MedImg/GlandSeg/GlaS/test_proc/Images')
+# parser.add_argument('--label_dir', type=str, default='/home/data2/MedImg/GlandSeg/GlaS/test_proc/Annotation')
 
 parser.add_argument('--img_dir', type=str, default='/home/data2/MedImg/NucleiSeg/MoNuSeg/Test/Images')
-parser.add_argument('--label_dir', type=str, default='/home/data2/MedImg/NucleiSeg/MoNuSeg/Test/Annotation')
-parser.add_argument('--prompt_dir', type=str, default='/home/data2/MedImg/NucleiSeg/MoNuSeg/Test/Prompts')
+parser.add_argument('--label_dir', type=str, default='/home/data2/MedImg/NucleiSeg/MoNuSeg/Test/Annotation/')
 
-# parser.add_argument('--img_dir', type=str, default='/home/data2/MedImg/GlandSeg/GlaS/test/Images')
-# parser.add_argument('--label_dir', type=str, default='/home/data2/MedImg/GlandSeg/GlaS/test/Annotation')
-# parser.add_argument('--prompt_dir', type=str, default='/home/data2/MedImg/GlandSeg/GlaS/test/Prompts')
-
-parser.add_argument('--desc', type=str,
-                    # default='SAM-vit-h-sam',
-                    default='SAM-vit-b-total-points',
+parser.add_argument('--mode', type=str,
+                    default='adpt',
                     )
 
-parser.add_argument('--model', type=str, default="vit_b")
+parser.add_argument('--desc', type=str,
+                    # default='SAM-vit-h',
+                    default='SAM-vit-b-with-auto-points',
+                    )
+
 parser.add_argument('--model_path', type=str,
-                    default="/home/data1/my/Project/segment-anything-main/sam_vit_b.pth")
+                    # glas orig sam
+                    # default="/home/data1/my/Project/GlandSegBenchmark/Medical-SAM-Adapter/logs_p/glas-samOrig-b-1024-16-256_2023_10_29_20_02/Model/checkpoint_400.pth",
+                    # default="/home/data1/my/Project/GlandSegBenchmark/Medical-SAM-Adapter/logs_p/glas-samOrig-h-1024-16-256_2023_10_29_20_04/Model/checkpoint_200.pth"
+                    # glas adpt sam
+                    # default="/home/data1/my/Project/GlandSegBenchmark/Medical-SAM-Adapter/logs_p/glas-samAdpt-b-1024-16-256_2023_10_31_21_38/Model/checkpoint_380.pth"
+                    # default="/home/data1/my/Project/GlandSegBenchmark/Medical-SAM-Adapter/logs_p/glas-samAdpt-h-1024-16-256_2023_10_31_21_42/Model/checkpoint_200.pth"
+                    # monuseg
+                    # default="/home/data1/my/Project/GlandSegBenchmark/Medical-SAM-Adapter/logs/monuseg-samOrig-b-1024-16-256_2023_10_28_20_29_27/Model/checkpoint_100"
+                    default="/home/data1/my/Project/GlandSegBenchmark/Medical-SAM-Adapter/logs_p/monuseg-samAdpt-b-1024-16-256_2023_11_01_16_10/Model/checkpoint_50.pth"
+                    )
 
 parser.add_argument('--dataset', type=str, choices=['GlaS', 'CRAG'], default='MoNuSeg', help='which dataset be used')
-parser.add_argument('--gpu', type=list, default=[0, ], help='GPUs for training')
+parser.add_argument('--gpu', type=list, default=[2, ], help='GPUs for training')
 
 # 后处理参数
 parser.add_argument('--min_area', type=int, default=32, help='minimum area for an object')
+# parser.add_argument('--radius', type=int, default=4)
 args = parser.parse_args()
 
+
+def img_preprocessing(image, sam):
+    original_image_size = (image.shape[0], image.shape[1])
+    transform = ResizeLongestSide(sam.image_encoder.img_size)
+    input_image = transform.apply_image(np.array(image))
+    input_image = torch.as_tensor(input_image, dtype=torch.float32, device=sam.device) # set to float32
+    input_image = input_image.permute(2, 0, 1).contiguous()[None, :, :, :]
+    input_size = input_image.shape[-2:]
+    input_image = sam.preprocess(input_image) # do not need padding here
+    return input_image, original_image_size, input_size
+
+def get_scaled_prompt(points, sam, original_image_size, if_transform: bool = True):
+    transform = ResizeLongestSide(sam.image_encoder.img_size)
+    points = transform.apply_coords(points, original_image_size) if if_transform else points
+    points = torch.as_tensor(points, device=sam.device).unsqueeze(1)
+    points = (points, torch.ones(points.shape[0], 1))
+    return points
 
 def main():
     os.environ['CUDA_VISIBLE_DEVICES'] = ','.join(str(x) for x in args.gpu)
 
     img_dir = args.img_dir
     label_dir = args.label_dir
-    prompt_dir = args.prompt_dir
-    save_dir = "%s/%s_%s" % (args.save_dir, args.dataset, args.desc)
+    if args.mode == 'adpt':
+        save_dir = "%s/%s_%s-adpt" % (args.save_dir, args.dataset, args.desc)
+    else:
+        save_dir = "%s/%s_%s" % (args.save_dir, args.dataset, args.desc)
+
+    model_path = args.model_path
     save_flag = True
+    points_batch_size = 8
 
     # check if it is needed to compute accuracies
     eval_flag = True if label_dir else False
 
+    epoch = os.path.basename(model_path).split('.')[0].split('_')[-1]
+    print("=> loaded model at epoch {}".format(epoch))
+
+    # model = sam_model_registry['vit_b']().cuda()
+    model = sam_model_registry['vit_b'](args).cuda()
+    if args.model_path:
+        weights = torch.load(args.model_path, map_location='cpu')["state_dict"]
+        model.load_state_dict(weights, strict=True)
+
+    # switch to evaluate mode
+    model.eval()
+    print("=> Test begins:")
+
     img_names = os.listdir(img_dir)
+
     # TP, FP, FN, dice_g, dice_s, iou_g, iou_s, haus_g, haus_s, gt_area, seg_area
+
     all_results = dict()
 
     if save_flag:
         if not os.path.exists(save_dir):
-            os.mkdir(save_dir)
+            os.makedirs(save_dir)
 
-        prob_maps_folder = '{:s}/{:s}_{:s}/{:s}'.format(args.save_dir, args.dataset, args.desc, 'mask_pred')
+        prob_maps_folder = '{:s}/{:s}'.format(save_dir, 'mask_pred')
         if not os.path.exists(prob_maps_folder):
             os.mkdir(prob_maps_folder)
-        vis_maps_folder = '{:s}/{:s}_{:s}/{:s}'.format(args.save_dir, args.dataset, args.desc, 'vis_pred')
+        vis_maps_folder = '{:s}/{:s}'.format(save_dir, 'vis_pred')
         if not os.path.exists(vis_maps_folder):
             os.mkdir(vis_maps_folder)
-
-    sam = sam_model_registry[args.model](checkpoint=args.model_path).cuda()
-
-    # predictor mode
-    predictor = SamPredictor(sam)
-
-    # anything mode
-    # mask_generator = SamAutomaticMaskGenerator(sam)
-
 
     for img_name in img_names:
         # load test image
@@ -89,60 +132,71 @@ def main():
         orig_img = Image.open(img_path)
         name = os.path.splitext(img_name)[0]
 
-        ################################################################################################
-        img = Image.open(img_path)
+        ########################### esenbling from multi-scale #################################
+        image = Image.open(img_path).convert('RGB')
+        image = np.array(image)
+        h, w, _ = image.shape
+        res_mask = np.zeros((h, w), np.uint8)
+        image_mask = np.zeros((h, w), np.uint8)
+        # label_path = '{:s}/{:s}_anno.bmp'.format(label_dir, name)
+        # label_img = np.array(Image.open(label_path))
+        label_img = scio.loadmat('{:s}/{:s}.mat'.format(label_dir, name))['inst_map']
 
-        #-------------------------- Any Mode -------------------------------#
-        # masks = mask_generator.generate(np.array(img))
-        # width, height = img.size
-        # pred = np.zeros(shape=(height, width))
-        # for mask in masks:
-        #     # if mask['area'] > 150000: continue
-        #     if mask['area'] > 10000: continue
-        #     pred += mask['segmentation']
-        # ------------------------------------------------------------------#
+        ''' preprocess '''
+        input_image, original_image_size, input_size = img_preprocessing(image, model)
+        pts_orig_scale_a, _ = generate_click_prompt_all_inst(label_img)
+        pts_orig_scale = scio.loadmat(f'/home/data1/my/Project/CrowdCounting-P2PNet/'
+                                      f'MoNuSeg_center_pred_dir/{name}.mat')['center_map']
+        pts = get_scaled_prompt(pts_orig_scale, model, original_image_size)
+        # masks = torch.as_tensor(masks, dtype=torch.float32).cuda()
 
-        # get points/boxes prompts
-        predictor.set_image(np.array(img))
-        points = scio.loadmat('{:s}/{:s}.mat'.format(prompt_dir, name))['points']
-        points = points[:, np.newaxis, :] # K, 2 --> N, K, 2
-        boxes = scio.loadmat('{:s}/{:s}.mat'.format(prompt_dir, name))['boxes']
+        # for i in range(pts[0].shape[0]): input pt prop with batch
+        point_num = pts[0].shape[0]
+        if point_num % points_batch_size == 0:
+            batch_num = point_num // points_batch_size
+        else:
+            batch_num = point_num // points_batch_size + 1
 
-        #----------------------- ponits promp ------------------------------#
-        # selected points
-        # pointNums = 20
-        # pointNums = pointNums if pointNums < points.shape[0] else points.shape[0]
-        # random_indices = np.random.choice(points.shape[0], pointNums, replace=False)
-        # points_selected = points[random_indices, :, :]
-        # width, height = img.size
-        # pred = np.zeros(shape=(height, width))
-        # for i in range(points_selected.shape[0]):
-        #     mask, _, _ = predictor.predict(point_coords=points_selected[i],
-        #                                    point_labels=np.array([1]),
-        #                                    # point_labels=np.ones(shape=(points_selected.shape[0], )),
-        #                                    multimask_output=False)
-        #     pred += mask[0]
+        for i in range(batch_num):
+            if i != (point_num // points_batch_size):
+                single_pt = (pts[0][i * points_batch_size: (i + 1) * points_batch_size],
+                             pts[1][i * points_batch_size: (i + 1) * points_batch_size])
+                # batch_masks = masks[i * points_batch_size: (i + 1) * points_batch_size]
+            else:
+                single_pt = (pts[0][i * points_batch_size:],
+                             pts[1][i * points_batch_size:])
+                # batch_masks = masks[i * points_batch_size:]
 
+            ''' forward '''
+            # --------------------- get prompt --------------------------#
+            with torch.no_grad():
+                imge= model.image_encoder(input_image)
+                se, de = model.prompt_encoder(
+                    points=single_pt,
+                    # points=None,
+                    boxes=None,
+                    masks=None,
+                )
 
-        # total points
-        width, height = img.size
-        pred = np.zeros(shape=(height, width))
-        for i in range(points.shape[0]):
-            mask, _, _ = predictor.predict(point_coords=points[i], point_labels=np.array([1]),
-                                           multimask_output=False)
-            pred += mask[0]
-        # ----------------------- ponits promp ------------------------------#
+                output, _ = model.mask_decoder(
+                    image_embeddings=imge,
+                    image_pe=model.prompt_encoder.get_dense_pe(),
+                    sparse_prompt_embeddings=se,
+                    dense_prompt_embeddings=de,
+                    multimask_output=False,
+                )
 
-        # ------------------------ boxes promp ------------------------------#
-        # width, height = img.size
-        # pred = np.zeros(shape=(height, width))
-        # for b in range(boxes.shape[0]):
-        #     box = boxes[b]
-        #     mask, _, _ = predictor.predict(box=box, multimask_output=False)
-        #     pred += mask[0]
-        # ------------------------ boxes promp ------------------------------#
+            ''' postprocess '''
+            # msk
+            upscaled_masks = model.postprocess_masks(output, input_size, original_image_size).squeeze(1)
+            upscaled_masks = (upscaled_masks > 0.5).float().detach().cpu().numpy()
 
-        ########################################################################################################
+            for ind in range(upscaled_masks.shape[0]):
+                image_mask[upscaled_masks[ind] == 1] = 1
+
+        res_mask[image_mask == 1] = 1
+        pred = res_mask
+
 
         ############################### post proc ################################################
         # 将二值图像转换为标签图像
@@ -153,18 +207,20 @@ def main():
         pred = (filtered_label_image > 0).astype(np.uint8)
         # fill holes
         pred = ndimage.binary_fill_holes(pred)
-        ###############################################################################################
+        ################################################################################################ # remove small object
 
         if eval_flag:
-            label_img = scio.loadmat('{:s}/{:s}.mat'.format(label_dir, name))['inst_map']
-            # label_img = cv2.imread('{:s}/{:s}_anno.bmp'.format(label_dir, name))[:, :, 0]
             label_img = np.array(label_img != 0, dtype=np.uint8)
+            label_img_vis = cv2.cvtColor(label_img * 255, cv2.COLOR_GRAY2RGB)
+            pred_vis = cv2.cvtColor(pred.astype(np.uint8) * 255, cv2.COLOR_GRAY2RGB)
+            for point in pts_orig_scale:
+                cv2.circle(pred_vis, (round(point[1]), round(point[0])), 3, (0, 0, 255), -1)
+            for point in pts_orig_scale_a:
+                cv2.circle(pred_vis, (round(point[1]), round(point[0])), 3, (0, 255, 0), -1)
 
-
-        if eval_flag:
             img_show = np.concatenate([np.array(orig_img),
-                                       np.stack((label_img * 255, label_img * 255, label_img * 255), axis=-1),
-                                       np.stack((pred * 255, pred * 255, pred * 255), axis=-1)],
+                                       label_img_vis,
+                                       pred_vis],
                                        axis=1)
             cv2.imwrite('{:s}/{}.png'.format(vis_maps_folder, name), img_show)
 
@@ -201,7 +257,7 @@ def main():
     avg_dice = np.nanmean(avg_dice)
     header = ['pixel_acc', 'Iou', 'Dice']
     save_results(header, [avg_pq, avg_iou, avg_dice], all_results,
-                 f'{save_dir:s}/test_result__overall_iou_{over_all_iou:.4f}_dice_{2 * over_all_iou / (1 + over_all_iou):.4f}_'
+                 f'{save_dir:s}/test_result_epoch{epoch}_overall_iou_{over_all_iou:.4f}_dice_{2 * over_all_iou / (1 + over_all_iou):.4f}_'
                  f'f1score_{over_all_f1:.4f}.txt')
 
 
@@ -259,11 +315,10 @@ def get_overall_valid_score(pred_image_path, groundtruth_path, num_workers=1, nu
 
         for im_name in image_list:
             cam = np.load(os.path.join(pred_image_path, f"{im_name}.npy"), allow_pickle=True).astype(np.uint8).reshape(-1)
+
+            # groundtruth = np.asarray(Image.open(groundtruth_path + f"/{im_name}_anno.bmp"))
             groundtruth = scio.loadmat(groundtruth_path + f"/{im_name}.mat")['inst_map']
             groundtruth = np.array(groundtruth != 0, dtype=np.uint8).reshape(-1)
-
-            # groundtruth = cv2.imread(groundtruth_path + f"/{im_name}_anno.bmp")[:, :, 0].reshape(-1)
-            # groundtruth = np.array(groundtruth != 0, dtype=np.uint8)
 
             gt_list.extend(groundtruth)
             pred_list.extend(cam)
@@ -349,4 +404,3 @@ def save_results(header, avg_results, all_results, filename, mode='w'):
 
 if __name__ == '__main__':
     main()
-

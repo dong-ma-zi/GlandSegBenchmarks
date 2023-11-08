@@ -2,7 +2,7 @@
 #!/usr/bin/env	python3
 
 """ train network using pytorch
-    Junde Wu
+    my
 """
 import glob
 
@@ -10,7 +10,7 @@ import torch
 
 from conf import settings
 from utils import *
-import function 
+import function_masks_prop
 # from dataloader import DataFolder
 # from my_transforms import get_transforms
 # from torch.utils.data import DataLoader
@@ -19,32 +19,27 @@ args = cfg.parse_args()
 os.environ['CUDA_VISIBLE_DEVICES'] = ','.join(str(x) for x in [args.gpu_device])
 GPUdevice = torch.device('cuda', args.gpu_device)
 '''load and load pretrained model'''
-net = get_network(args, args.net, vit_mode='vit_b', gpu_device=GPUdevice,)
+net = get_network(args, args.net, vit_mode='vit_h', gpu_device=GPUdevice,
+                  use_gpu=args.gpu, distribution=args.distributed)
 
 # load pretrained weights
-# net.load_state_dict(torch.load("/home/data1/my/Project/GlandSegBenchmark/Medical-SAM-Adapter/logs_p_ck1106/"
-#                                "monuseg-samAdpt-b-1024-16-256-cent-prpen_2023_11_06_15_21/"
-#                                "Model/checkpoint_20.pth", map_location='cpu')['state_dict'])
+# net.load_state_dict(torch.load("/home/data1/my/Project/GlandSegBenchmark/Medical-SAM-Adapter/"
+#                                "logs_p/monuseg-samOrig-b-1024-16-256_2023_10_29_20_07/Model/"
+#                                "checkpoint_50.pth")['state_dict'])
 
-
-# net.load_state_dict(torch.load("/home/data1/my/Project/GlandSegBenchmark/"
-#                                "Medical-SAM-Adapter/logs_p_ck1106/"
-#                                "monuseg-samAdpt-b-1024-16-256-cent_2023_11_06_15_10/"
-#                                "Model/checkpoint_30.pth", map_location='cpu')['state_dict'])
-
-# # n_list = [n for n, _ in net.named_parameters()]
-# for n, value in net.image_encoder.named_parameters():
-#     if "Adapter" not in n:
-#         value.requires_grad = False
-#     else:
-#         print('training para: ', n)
-
-# n_list = [n for n, _ in net.named_parameters()]
-for n, value in net.named_parameters():
-    if "mask_decoder" not in n:
+n_list = [n for n, _ in net.named_parameters()]
+for n, value in net.image_encoder.named_parameters():
+    if "Adapter" not in n:
         value.requires_grad = False
     else:
         print('training para: ', n)
+
+# # n_list = [n for n, _ in net.named_parameters()]
+# for n, value in net.named_parameters():
+#     if "mask_decoder" not in n:
+#         value.requires_grad = False
+#     else:
+#         print('training para: ', n)
 
 
 optimizer = optim.Adam([p for p in net.parameters() if p.requires_grad == True],
@@ -54,34 +49,72 @@ optimizer = optim.Adam([p for p in net.parameters() if p.requires_grad == True],
 # scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=10, gamma=0.5) #learning rate decay
 
 
-args.path_helper = set_log_dir('logs_points_mod1107', args.exp_name)
+args.path_helper = set_log_dir('logs_p', args.exp_name)
 logger = create_logger(args.path_helper['log_path'])
 logger.info(args)
 
 
+# ----- define augmentation ----- #
+# data_transforms = {
+#     'train': get_transforms({
+#     'horizontal_flip': True,
+#     'vertical_flip': True,
+#     # 'random_elastic': [6, 15],
+#     'random_rotation': 90,
+#     'to_tensor': 1,
+#     # 'normalize': [[0.787, 0.511, 0.785], [0.167, 0.248, 0.131]],
+# }),
+#     'val': get_transforms({
+#     'to_tensor': 1,
+#     # 'normalize': [[0.787, 0.511, 0.785], [0.167, 0.248, 0.131]],
+# })}
+
+# # ----- load data ----- #
+# data_path = {'train': '/home/data2/MedImg/GlandSeg/GlaS/my/train/448x448',
+#              'val': '/home/data2/MedImg/GlandSeg/GlaS/my/valid/448x448'}
+
+# data_path = {'train': '/home/data2/MedImg/NucleiSeg/MoNuSeg/extracted_mirror/train/512x512_256x256/',
+#              'val': '/home/data2/MedImg/NucleiSeg/MoNuSeg/Test'}
+
+# dsets = {}
+# for x in ['train', 'val']:
+#     img_dir = os.path.join(data_path[x], 'Images')
+#     target_dir = os.path.join(data_path[x], 'Annotation')
+#
+#     dir_list = [img_dir, target_dir]
+#     dsets[x] = DataFolder(dir_list # , data_transform=data_transforms[x]
+#                           )
+#
+# train_loader = DataLoader(dsets['train'], batch_size=1, shuffle=True,
+#                           num_workers=4)
+# val_loader = DataLoader(dsets['val'], batch_size=1, shuffle=False,
+#                         num_workers=4)
+
+
+
 # ----- load data ----- #
 
-data_path = {'train': '/home/data2/MedImg/GlandSeg/GlaS/train',
-             'val': '/home/data2/MedImg/GlandSeg/GlaS/test_proc'}
+# data_path = {'train': '/home/data2/MedImg/GlandSeg/GlaS/train',
+#              'val': '/home/data2/MedImg/GlandSeg/GlaS/test_proc'}
 
-# data_path = {'train': '/home/data2/MedImg/NucleiSeg/MoNuSeg/Train',
-#              'val': '/home/data2/MedImg/NucleiSeg/MoNuSeg/Test'}
+data_path = {'train': '/home/data2/MedImg/NucleiSeg/MoNuSeg/Train',
+             'val': '/home/data2/MedImg/NucleiSeg/MoNuSeg/Test'}
 
 
 train_img_list = sorted(glob.glob(os.path.join(data_path['train'], 'Images/*')))
 train_anno_list = []
 for i in train_img_list:
     img_name = os.path.basename(i).split('.')[0]
-    train_anno_list += [os.path.join(data_path['train'], 'Annotation', img_name + '_anno.bmp')]
-    # train_anno_list += [os.path.join(data_path['train'], 'Annotation', img_name + '.mat')]
+    # train_anno_list += [os.path.join(data_path['train'], 'Annotation', img_name + '_anno.bmp')]
+    train_anno_list += [os.path.join(data_path['train'], 'Annotation', img_name + '.mat')]
 # train_anno_list = sorted(glob.glob(os.path.join(data_path['train'], 'Annotation/*')))
 
 val_img_list = sorted(glob.glob(os.path.join(data_path['val'], 'Images/*')))
 val_anno_list = []
 for i in val_img_list:
     img_name = os.path.basename(i).split('.')[0]
-    val_anno_list += [os.path.join(data_path['val'], 'Annotation', img_name + '_anno.bmp')]
-    # val_anno_list += [os.path.join(data_path['val'], 'Annotation', img_name + '.mat')]
+    # val_anno_list += [os.path.join(data_path['val'], 'Annotation', img_name + '_anno.bmp')]
+    val_anno_list += [os.path.join(data_path['val'], 'Annotation', img_name + '.mat')]
 # val_anno_list = sorted(glob.glob(os.path.join(data_path['val'], 'Annotation/*')))
 
 # '''checkpoint path and tensorboard'''
