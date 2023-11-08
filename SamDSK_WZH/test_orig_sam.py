@@ -18,13 +18,8 @@ from PIL import Image
 import numpy as np
 import argparse
 
-parser = argparse.ArgumentParser(description="Testing oeem segmentation Model")
-parser.add_argument('--batch_size', type=int, default=4, help='input batch size for training')
+parser = argparse.ArgumentParser(description="Testing SAM Model")
 parser.add_argument('--num_workers', type=int, default=2, help='number of workers to load images')
-parser.add_argument('--weight_decay', type=float, default=1e-4, help='weight decay')
-parser.add_argument('--checkpoint', type=str, default=None, help='start from checkpoint')
-parser.add_argument('--checkpoint_freq', type=int, default=10, help='epoch to save checkpoints')
-parser.add_argument('--epochs', type=int, default=100, help='number of epochs to train')
 parser.add_argument('--save_dir', type=str, default='./experimentsP')
 parser.add_argument('--img_dir', type=str, default='/home/data2/MedImg/GlandSeg/CRAG/train/Images')
 parser.add_argument('--label_dir', type=str, default='/home/data2/MedImg/GlandSeg/CRAG/train/Annotation')
@@ -43,8 +38,9 @@ parser.add_argument('--gpu', type=list, default=[3], help='GPUs for training')
 # 后处理参数
 parser.add_argument('--min_area', type=int, default=400, help='minimum area for an object')
 parser.add_argument('--radius', type=int, default=4)
-parser.add_argument('--mode', type=str, choices=['everything', 'prompt'], default='everything', help='mode for SAM')
+parser.add_argument('--mode', type=str, choices=['everything', 'prompt'], default='prompt', help='mode for SAM')
 parser.add_argument('--prompt_mode', type=str, choices=['randomPoint', 'point', 'box'], default='box', help='prompt mode for SAM')
+parser.add_argument('--round', type=int, default=1, help='number of round for self-training process')
 
 args = parser.parse_args()
 #torch.cuda.set_device(args.gpu)
@@ -55,27 +51,26 @@ def main():
     img_dir = args.img_dir
     label_dir = args.label_dir
     prompt_dir = args.prompt_dir
-    save_dir = "%s/%s_%s_%s_%s" % (args.save_dir, args.dataset, args.desc, args.mode, args.prompt_mode)
     save_flag = True
 
     # check if it is needed to compute accuracies
     eval_flag = True if label_dir else False
-
     img_names = os.listdir(img_dir)
-    # TP, FP, FN, dice_g, dice_s, iou_g, iou_s, haus_g, haus_s, gt_area, seg_area
+
     all_results = dict()
 
+    save_dir = "%s/%s_%s_%s_%s_round%s" % (args.save_dir, args.dataset, args.desc, args.mode, args.prompt_mode, args.round)
     if save_flag:
         if not os.path.exists(save_dir):
             os.makedirs(save_dir)
 
-        prob_maps_folder = '{:s}/{:s}_{:s}_{:s}_{:s}/{:s}'.format(args.save_dir, args.dataset, args.desc, args.mode, args.prompt_mode, 'mask_pred')
+        prob_maps_folder = '{:s}/{:s}'.format(save_dir, 'mask_pred')
         if not os.path.exists(prob_maps_folder):
             os.mkdir(prob_maps_folder)
-        inst_maps_folder = '{:s}/{:s}_{:s}_{:s}_{:s}/{:s}'.format(args.save_dir, args.dataset, args.desc, args.mode, args.prompt_mode, 'inst_pred')
+        inst_maps_folder = '{:s}/{:s}'.format(save_dir, 'inst_pred')
         if not os.path.exists(inst_maps_folder):
             os.mkdir(inst_maps_folder)
-        vis_maps_folder = '{:s}/{:s}_{:s}_{:s}_{:s}/{:s}'.format(args.save_dir, args.dataset, args.desc, args.mode, args.prompt_mode, 'vis_pred')
+        vis_maps_folder = '{:s}/{:s}'.format(save_dir, 'vis_pred')
         if not os.path.exists(vis_maps_folder):
             os.mkdir(vis_maps_folder)
 
@@ -98,13 +93,12 @@ def main():
 
         ## 试下做一次颜色变换
         img = cv2.cvtColor(np.array(img), cv2.COLOR_RGB2BGR)
-
+        contour_map = img.copy()
         if args.mode == 'everything':
             #======================= no prompt anything mode========================================#
             masks = mask_generator.generate(img)
             height, width, _ = img.shape
             pred = np.zeros(shape=(height, width))
-            contour_map = img.copy()
             max_area = height * width
             all_binary_maps = []
             for mask in masks:
@@ -143,9 +137,15 @@ def main():
                 ## box prompt
                 height, width, _ = img.shape
                 pred = np.zeros(shape=(height, width))
+                all_binary_maps = []
                 for b in range(boxes.shape[0]):
                     box = boxes[b]
                     mask, _, _ = predictor.predict(box=box, multimask_output=False)
+                    binary_map = np.array(mask[0], np.uint8)
+                    all_binary_maps.append(binary_map)
+                    contours, hierarchy = cv2.findContours(binary_map, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+                    for contour in range(len(contours)):
+                        contour_map = cv2.drawContours(contour_map, contours, contour, (0, 255, 0), 2, 8)
                     pred += mask[0]
                 # ======================================================================================
 
@@ -177,7 +177,8 @@ def main():
             cv2.imwrite('{:s}/{}_contour.png'.format(vis_maps_folder, name), contour_map)
 
             np.save('{:s}/{}.npy'.format(prob_maps_folder, name), pred)
-            np.save('{:s}/{}.npy'.format(inst_maps_folder, name), np.array(all_binary_maps))
+            all_binary_maps = np.array(all_binary_maps)
+            np.save('{:s}/{}.npy'.format(inst_maps_folder, name), all_binary_maps)
             print('\tComputing metrics...')
             result = utils.accuracy_pixel_level(np.expand_dims(pred > 0, 0), np.expand_dims(label_img > 0, 0))
             pixel_accu = result[0]

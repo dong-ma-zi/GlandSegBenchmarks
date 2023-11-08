@@ -25,25 +25,27 @@ parser = argparse.ArgumentParser(description='Test MedT')
 parser.add_argument('--cuda', default="on", type=str, help='switch on/off cuda option (default: off)')
 parser.add_argument('--modelname', default='swinUnet', type=str, help='type of model')
 
-parser.add_argument('--save_dir', type=str, default='experiments/CRAG_10labeled_round2')
-parser.add_argument('--mask_save_dir', type=str, default='experiments/CRAG_10labeled_round2/Image_segmentation/')
-parser.add_argument('--inst_save_dir', type=str, default='experiments/CRAG_10labeled_round2/inst_pred/')
-parser.add_argument('--prompt_save_dir', type=str, default='experiments/CRAG_10labeled_round2/BoxPrompt/')
-parser.add_argument('--overlay_save_dir', type=str, default='experiments/CRAG_10labeled_round2/overlay/')
-parser.add_argument('--img_dir', type=str, default='/home/data2/MedImg/GlandSeg/CRAG/train/Images')
-parser.add_argument('--label_dir', type=str, default='/home/data2/MedImg/GlandSeg/CRAG/train/Annotation')
+parser.add_argument('--save_dir', type=str, default='experiments')
+# parser.add_argument('--mask_save_dir', type=str, default='experiments/CRAG_10labeled_round2_prompt_box/Image_segmentation/')
+# parser.add_argument('--inst_save_dir', type=str, default='experiments/CRAG_10labeled_round3/inst_pred/')
+# parser.add_argument('--prompt_save_dir', type=str, default='experiments/CRAG_10labeled_round3/BoxPrompt/')
+# parser.add_argument('--overlay_save_dir', type=str, default='experiments/CRAG_10labeled_round3/overlay/')
+parser.add_argument('--img_dir', type=str, default='/home/data2/MedImg/GlandSeg')
+parser.add_argument('--label_dir', type=str, default='/home/data2/MedImg/GlandSeg')
 parser.add_argument('--dataset', type=str, choices=['GlaS', 'CRAG'], default='CRAG', help='which dataset be used')
 
-
-parser.add_argument('--crop', type=int, default=None)
-parser.add_argument('--loaddirec', default='/home/data1/wzh/code/GlandSegBenchmarks/SamDSK_WZH/experiments/CRAG_10labeled_round2/500/swinUnet.pth', type=str)
+# parser.add_argument('--loaddirec', default='/home/data1/wzh/code/GlandSegBenchmarks/SamDSK_WZH/experiments/CRAG_10labeled_round3/500/swinUnet.pth', type=str)
 parser.add_argument('--imgsize', type=int, default=448)
 parser.add_argument('--gray', default='no', type=str)
 parser.add_argument('--device', default='cuda:3', type=str)
 parser.add_argument('--gpu', type=list, default=[3], help='GPUs for training')
 parser.add_argument('--aug', default='off', type=str, help='turn on img augmentation (default: False)')
+parser.add_argument('--round', type=int, default=2, help='number of round for self-training process')
 
 # 后处理参数
+parser.add_argument('--split', type=str, choices=['train', 'test'], default='test')
+parser.add_argument('--mode', type=str, choices=['everything', 'prompt'], default='prompt', help='mode for SAM')
+parser.add_argument('--prompt_mode', type=str, choices=['randomPoint', 'point', 'box'], default='box', help='prompt mode for SAM')
 parser.add_argument('--min_area', type=int, default=100, help='minimum area for an object')
 parser.add_argument('--radius', type=int, default=4)
 args = parser.parse_args()
@@ -52,17 +54,36 @@ gray_ = args.gray
 aug = args.aug
 modelname = args.modelname
 imgsize = args.imgsize
-loaddirec = args.loaddirec
 
 def main():
     global eval_flag, transforms, save_flag
-    eval_flag = False
+    eval_flag = True
     save_flag = True
 
-    if args.crop is not None:
-        crop = (args.crop, args.crop)
-    else:
-        crop = None
+    # ----- set directory ----- #
+    save_dir = "%s/%s_10labeled_%s_%s_round%s/" % (args.save_dir, args.dataset, args.mode, args.prompt_mode, args.round)
+    if not os.path.exists(save_dir):
+        os.mkdir(save_dir)
+
+    args.mask_save_dir = os.path.join(save_dir, 'Image_segmentation')
+    args.overlay_save_dir = os.path.join(save_dir, 'overlay')
+    args.prompt_save_dir = os.path.join(save_dir, 'BoxPrompt')
+    args.inst_save_dir = os.path.join(save_dir, 'inst_pred')
+    args.loaddirec = os.path.join(save_dir, '500', 'swinUnet.pth')
+
+    split_dataset_map = {'GlaS': {'train': 'train', 'test': 'test'}, 'CRAG': {'train': 'train', 'test': 'valid'}}
+    args.img_dir = os.path.join(args.img_dir, args.dataset, split_dataset_map[args.dataset][args.split], 'Images')
+    args.label_dir = os.path.join(args.label_dir, args.dataset, split_dataset_map[args.dataset][args.split],
+                                  'Annotation')
+
+    if not os.path.exists(args.mask_save_dir):
+        os.mkdir(args.mask_save_dir)
+    if not os.path.exists(args.overlay_save_dir):
+        os.mkdir(args.overlay_save_dir)
+    if not os.path.exists(args.prompt_save_dir):
+        os.mkdir(args.prompt_save_dir)
+    if not os.path.exists(args.inst_save_dir):
+        os.mkdir(args.inst_save_dir)
 
     # ----- define augmentation ----- #
     transforms = T.ToTensor()
@@ -80,19 +101,6 @@ def main():
     model.load_state_dict(torch.load(args.loaddirec))
     print("=> Load trained model")
     # model.eval()
-
-    save_dir = args.save_dir
-    if not os.path.exists(save_dir):
-        os.mkdir(save_dir)
-
-    if not os.path.exists(args.mask_save_dir):
-        os.mkdir(args.mask_save_dir)
-    if not os.path.exists(args.overlay_save_dir):
-        os.mkdir(args.overlay_save_dir)
-    if not os.path.exists(args.prompt_save_dir):
-        os.mkdir(args.prompt_save_dir)
-    if not os.path.exists(args.inst_save_dir):
-        os.mkdir(args.inst_save_dir)
 
     with torch.no_grad():
         validate(model, save_dir)
@@ -274,18 +282,20 @@ def validate(model, save_dir):
 
             print('=> Processed all {:d} images'.format(len(images_list)))
 
-    print('Average of all images:\n'
-          'recall: {r[1]:.4f}\n'
-          'precision: {r[2]:.4f}\n'
-          'F1: {r[3]:.4f}\n'
-          'dice: {r[4]:.4f}\n'
-          'iou: {r[5]:.4f}\n'
-          'haus: {r[6]:.4f}'.format(r=avg_results))
 
-    strs = args.img_dir.split('/')
-    header = ['pixel_acc', 'recall', 'precision', 'F1', 'Dice', 'IoU', 'Hausdorff']
-    save_results(header, avg_results, all_results,
-                 '{:s}/instance-wise_test_result.txt'.format(save_dir, strs[-1]))
+    if eval_flag:
+        print('Average of all images:\n'
+              'recall: {r[1]:.4f}\n'
+              'precision: {r[2]:.4f}\n'
+              'F1: {r[3]:.4f}\n'
+              'dice: {r[4]:.4f}\n'
+              'iou: {r[5]:.4f}\n'
+              'haus: {r[6]:.4f}'.format(r=avg_results))
+
+        strs = args.img_dir.split('/')
+        header = ['pixel_acc', 'recall', 'precision', 'F1', 'Dice', 'IoU', 'Hausdorff']
+        save_results(header, avg_results, all_results,
+                     '{:s}/instance-wise_test_result.txt'.format(save_dir, strs[-1]))
 
 
 def extract_prompt_and_save(pred_labeled, name):

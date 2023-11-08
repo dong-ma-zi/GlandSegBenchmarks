@@ -36,14 +36,16 @@ parser.add_argument('--cuda', default="on", type=str, help='switch on/off cuda o
 parser.add_argument('--aug', default='off', type=str, help='turn on img augmentation (default: False)')
 parser.add_argument('--load', default='default', type=str, help='load a pretrained model')
 parser.add_argument('--save_dir', type=str, default='experiments/')
-parser.add_argument('--refine_dir', type=str, default='experiments/CRAG_10labeled_round1/refine_inst_pred/')
+parser.add_argument('--refine_dir', type=str, default='experiments/CRAG_10labeled_round2/refine_inst_pred_prompt_box/')
 parser.add_argument('--crop', type=int, default=448)
 parser.add_argument('--imgsize', type=int, default=448)
 parser.add_argument('--gray', default='no', type=str)
 parser.add_argument('--device', default='cuda:3', type=str)
 parser.add_argument('--gpu', type=list, default=[3], help='GPUs for training')
-parser.add_argument('--round', type=int, default=3, help='number of round for self-training process')
+parser.add_argument('--round', type=int, default=2, help='number of round for self-training process')
 
+parser.add_argument('--mode', type=str, choices=['everything', 'prompt'], default='prompt', help='mode for SAM')
+parser.add_argument('--prompt_mode', type=str, choices=['randomPoint', 'point', 'box'], default='box', help='prompt mode for SAM')
 parser.add_argument('--gamma1', type=float, default=1, help='weight for dice loss')
 parser.add_argument('--gamma2', type=float, default=0.5, help='weight for object-level dice loss')
 args = parser.parse_args()
@@ -57,7 +59,7 @@ torch.cuda.set_device(args.device)
 def main():
     global logger
 
-    args.save_dir = "%s/%s_10labeled_round%s/" % (args.save_dir, args.dataset, args.round)
+    args.save_dir = "%s/%s_10labeled_%s_%s_round%s/" % (args.save_dir, args.dataset, args.mode, args.prompt_mode, args.round)
     if not os.path.exists(args.save_dir):
         os.makedirs(args.save_dir)
 
