@@ -25,18 +25,18 @@ parser = argparse.ArgumentParser(description='Test MedT')
 parser.add_argument('--cuda', default="on", type=str, help='switch on/off cuda option (default: off)')
 parser.add_argument('--modelname', default='swinUnet', type=str, help='type of model')
 
-parser.add_argument('--save_dir', type=str, default='experiments/GlaS_10labeled_round2')
-parser.add_argument('--mask_save_dir', type=str, default='experiments/GlaS_10labeled_round2/Image_segmentation/')
-parser.add_argument('--inst_save_dir', type=str, default='experiments/GlaS_10labeled_round2/inst_pred/')
-parser.add_argument('--prompt_save_dir', type=str, default='experiments/GlaS_10labeled_round2/BoxPrompt/')
-parser.add_argument('--overlay_save_dir', type=str, default='experiments/GlaS_10labeled_round2/overlay/')
-parser.add_argument('--img_dir', type=str, default='/home/data2/MedImg/GlandSeg/GlaS/train/Images')
-parser.add_argument('--label_dir', type=str, default='/home/data2/MedImg/GlandSeg/GlaS/train/Annotation')
-parser.add_argument('--dataset', type=str, choices=['GlaS', 'CRAG'], default='GlaS', help='which dataset be used')
+parser.add_argument('--save_dir', type=str, default='experiments/CRAG_10labeled_round2')
+parser.add_argument('--mask_save_dir', type=str, default='experiments/CRAG_10labeled_round2/Image_segmentation/')
+parser.add_argument('--inst_save_dir', type=str, default='experiments/CRAG_10labeled_round2/inst_pred/')
+parser.add_argument('--prompt_save_dir', type=str, default='experiments/CRAG_10labeled_round2/BoxPrompt/')
+parser.add_argument('--overlay_save_dir', type=str, default='experiments/CRAG_10labeled_round2/overlay/')
+parser.add_argument('--img_dir', type=str, default='/home/data2/MedImg/GlandSeg/CRAG/train/Images')
+parser.add_argument('--label_dir', type=str, default='/home/data2/MedImg/GlandSeg/CRAG/train/Annotation')
+parser.add_argument('--dataset', type=str, choices=['GlaS', 'CRAG'], default='CRAG', help='which dataset be used')
 
 
 parser.add_argument('--crop', type=int, default=None)
-parser.add_argument('--loaddirec', default='/home/data1/wzh/code/GlandSegBenchmarks/SamDSK_WZH/experiments/GlaS_10labeled_round2/500/swinUnet.pth', type=str)
+parser.add_argument('--loaddirec', default='/home/data1/wzh/code/GlandSegBenchmarks/SamDSK_WZH/experiments/CRAG_10labeled_round2/500/swinUnet.pth', type=str)
 parser.add_argument('--imgsize', type=int, default=448)
 parser.add_argument('--gray', default='no', type=str)
 parser.add_argument('--device', default='cuda:3', type=str)
@@ -56,7 +56,7 @@ loaddirec = args.loaddirec
 
 def main():
     global eval_flag, transforms, save_flag
-    eval_flag = True
+    eval_flag = False
     save_flag = True
 
     if args.crop is not None:
@@ -190,27 +190,29 @@ def validate(model, save_dir):
         pred_labeled = measure.label(pred2)
         pred_labeled = morph.remove_small_objects(pred_labeled, args.min_area)
 
-        ## proc 后处理
-        # pred_labeled = proc(output[0, 1, :, :])
-
-        print('\tComputing metrics...')
-        result = accuracy_pixel_level(np.expand_dims(pred_labeled > 0, 0), np.expand_dims(label_img > 0, 0))
-        pixel_accu = result[0]
-
-        # single_image_result = gland_accuracy_object_level(pred_labeled, label_img)
-        try:
-            objF1, _, _, _ = ObjectF1score(pred_labeled, label_img)
-        except:
-            continue
-        objDice = ObjectDice(pred_labeled, label_img)
-        dice = Dice(np.where(pred_labeled>0, 1, 0), np.where(label_img>0, 1, 0))
-        objHaus = ObjectHausdorff(pred_labeled, label_img)
-        single_image_result = (objF1, objDice, dice, objHaus)
-        accumulated_metrics += gland_accuracy_object_level_all_images(pred_labeled, label_img)
-        all_results[name] = tuple([pixel_accu, *single_image_result])
-
         # save prompt
         extract_prompt_and_save(pred_labeled, name)
+
+
+        ## proc 后处理
+        # pred_labeled = proc(output[0, 1, :, :])
+        if eval_flag:
+            print('\tComputing metrics...')
+            result = accuracy_pixel_level(np.expand_dims(pred_labeled > 0, 0), np.expand_dims(label_img > 0, 0))
+            pixel_accu = result[0]
+
+            # single_image_result = gland_accuracy_object_level(pred_labeled, label_img)
+            try:
+                objF1, _, _, _ = ObjectF1score(pred_labeled, label_img)
+            except:
+                continue
+            objDice = ObjectDice(pred_labeled, label_img)
+            dice = Dice(np.where(pred_labeled>0, 1, 0), np.where(label_img>0, 1, 0))
+            objHaus = ObjectHausdorff(pred_labeled, label_img)
+            single_image_result = (objF1, objDice, dice, objHaus)
+            all_results[name] = tuple([pixel_accu, *single_image_result])
+            accumulated_metrics += gland_accuracy_object_level_all_images(pred_labeled, label_img)
+
 
         # save image
         if save_flag:
@@ -220,69 +222,70 @@ def validate(model, save_dir):
             cv2.imwrite('{:s}/{:s}_seg.jpg'.format(args.mask_save_dir, name), final_pred)
 
             ## draw overlay
-            overlay = draw_rand_inst_overlay(image, pred_labeled)
+            overlay = draw_rand_inst_overlay(cv2.cvtColor(image, cv2.COLOR_BGR2RGB), pred_labeled)
             cv2.imwrite('{:s}/{:s}_seg.jpg'.format(args.overlay_save_dir, name), overlay)
 
             np.save('{:s}/{:s}.npy'.format(args.inst_save_dir, name), pred_labeled)
 
 
-        # 打印每张test的指标
-        print('Pixel Acc: {r[0]:.4f}\n'
-              'F1: {r[1]:.4f}\n'
-              'ObjDice: {r[2]:.4f}\n'
-              'Dice: {r[3]:.4f}\n'
-              'haus: {r[4]:.4f}'.format(r=[pixel_accu, objF1, objDice, dice, objHaus]))
+        if eval_flag:
+            # 打印每张test的指标
+            print('Pixel Acc: {r[0]:.4f}\n'
+                  'F1: {r[1]:.4f}\n'
+                  'ObjDice: {r[2]:.4f}\n'
+                  'Dice: {r[3]:.4f}\n'
+                  'haus: {r[4]:.4f}'.format(r=[pixel_accu, objF1, objDice, dice, objHaus]))
 
-    avg_pq = []
-    avg_f1 = []
-    avg_objDice = []
-    avg_dice = []
-    avg_haus = []
-    for name in all_results:
-        pq, f1, objDice, dice, haus = all_results[name]
-        avg_pq += [pq]
-        avg_f1 += [f1]
-        avg_objDice += [objDice]
-        avg_dice += [dice]
-        avg_haus += [haus]
-    avg_pq = np.nanmean(avg_pq)
-    avg_f1 = np.nanmean(avg_f1)
-    avg_objDice = np.nanmean(avg_objDice)
-    avg_dice = np.nanmean(avg_dice)
-    avg_haus = np.nanmean(avg_haus)
-    header = ['pixel_acc', 'objF1', 'objDice', 'Dice', 'objHaus']
-    save_results(header, [avg_pq, avg_f1, avg_objDice, avg_dice, avg_haus], all_results,
-                 '{:s}/test_result.txt'.format(save_dir))
+            avg_pq = []
+            avg_f1 = []
+            avg_objDice = []
+            avg_dice = []
+            avg_haus = []
+            for name in all_results:
+                pq, f1, objDice, dice, haus = all_results[name]
+                avg_pq += [pq]
+                avg_f1 += [f1]
+                avg_objDice += [objDice]
+                avg_dice += [dice]
+                avg_haus += [haus]
+            avg_pq = np.nanmean(avg_pq)
+            avg_f1 = np.nanmean(avg_f1)
+            avg_objDice = np.nanmean(avg_objDice)
+            avg_dice = np.nanmean(avg_dice)
+            avg_haus = np.nanmean(avg_haus)
+            header = ['pixel_acc', 'objF1', 'objDice', 'Dice', 'objHaus']
+            save_results(header, [avg_pq, avg_f1, avg_objDice, avg_dice, avg_haus], all_results,
+                         '{:s}/image-wise_test_result.txt'.format(save_dir))
 
-    print('Average Dice: {:.4f}'.format(avg_dice))
+            print('Average Dice: {:.4f}'.format(avg_dice))
 
-    TP, FP, FN, dice_g, dice_s, iou_g, iou_s, hausdorff_g, hausdorff_s, \
-    gt_objs_area, pred_objs_area = accumulated_metrics
+            TP, FP, FN, dice_g, dice_s, iou_g, iou_s, hausdorff_g, hausdorff_s, \
+            gt_objs_area, pred_objs_area = accumulated_metrics
 
-    recall = TP / (TP + FN)
-    precision = TP / (TP + FP)
-    F1 = 2 * TP / (2 * TP + FP + FN)
-    dice = (dice_g / gt_objs_area + dice_s / pred_objs_area) / 2
-    iou = (iou_g / gt_objs_area + iou_s / pred_objs_area) / 2
-    haus = (hausdorff_g / gt_objs_area + hausdorff_s / pred_objs_area) / 2
+            recall = TP / (TP + FN)
+            precision = TP / (TP + FP)
+            F1 = 2 * TP / (2 * TP + FP + FN)
+            dice = (dice_g / gt_objs_area + dice_s / pred_objs_area) / 2
+            iou = (iou_g / gt_objs_area + iou_s / pred_objs_area) / 2
+            haus = (hausdorff_g / gt_objs_area + hausdorff_s / pred_objs_area) / 2
 
-    avg_pixel_accu = -1
-    avg_results = [avg_pixel_accu, recall, precision, F1, dice, iou, haus]
+            avg_pixel_accu = -1
+            avg_results = [avg_pixel_accu, recall, precision, F1, dice, iou, haus]
 
-    print('=> Processed all {:d} images'.format(len(images_list)))
-    if eval_flag:
-        print('Average of all images:\n'
-              'recall: {r[1]:.4f}\n'
-              'precision: {r[2]:.4f}\n'
-              'F1: {r[3]:.4f}\n'
-              'dice: {r[4]:.4f}\n'
-              'iou: {r[5]:.4f}\n'
-              'haus: {r[6]:.4f}'.format(r=avg_results))
+            print('=> Processed all {:d} images'.format(len(images_list)))
 
-        strs = args.img_dir.split('/')
-        header = ['pixel_acc', 'recall', 'precision', 'F1', 'Dice', 'IoU', 'Hausdorff']
-        save_results(header, avg_results, all_results,
-                     '{:s}/{:s}_test_result_ck.txt'.format(save_dir, strs[-1]))
+    print('Average of all images:\n'
+          'recall: {r[1]:.4f}\n'
+          'precision: {r[2]:.4f}\n'
+          'F1: {r[3]:.4f}\n'
+          'dice: {r[4]:.4f}\n'
+          'iou: {r[5]:.4f}\n'
+          'haus: {r[6]:.4f}'.format(r=avg_results))
+
+    strs = args.img_dir.split('/')
+    header = ['pixel_acc', 'recall', 'precision', 'F1', 'Dice', 'IoU', 'Hausdorff']
+    save_results(header, avg_results, all_results,
+                 '{:s}/instance-wise_test_result.txt'.format(save_dir, strs[-1]))
 
 
 def extract_prompt_and_save(pred_labeled, name):

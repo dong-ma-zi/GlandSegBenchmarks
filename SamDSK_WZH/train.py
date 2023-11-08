@@ -22,11 +22,11 @@ parser.add_argument('--epochs', default=500, type=int, help='number of total epo
 parser.add_argument('--start-epoch', default=0, type=int, help='manual epoch number (useful on restarts)')
 parser.add_argument('--batch_size', default=4, type=int, help='batch size (default: 1)')
 ## GlaS 1e-4，这个非常重要，学习率轻微调整都对结果有很大影响, CRAG 5e-5；
-parser.add_argument('--learning_rate', default=1e-4, type=float, help='initial learning rate (default: 0.001)')
+parser.add_argument('--learning_rate', default=5e-5, type=float, help='initial learning rate (default: 0.001)')
 parser.add_argument('--momentum', default=0.9, type=float, help='momentum')
 parser.add_argument('--weight-decay', '--wd', default=1e-5, type=float, help='weight decay (default: 1e-5)')
 parser.add_argument('--save_freq', type=int,default = 50)
-parser.add_argument('--dataset', type=str, choices=['GlaS', 'CRAG'], default='GlaS', help='which dataset be used')
+parser.add_argument('--dataset', type=str, choices=['GlaS', 'CRAG'], default='CRAG', help='which dataset be used')
 
 parser.add_argument('--last_model_path', type=str, default="../MedT/swin_tiny_patch4_window7_224.pth")
                     #default="/home/data1/wzh/code/GlandSegBenchmarks/SamDSK_WZH/experiments/GlaS_10labeled_round1/500/swinUnet.pth")
@@ -36,13 +36,13 @@ parser.add_argument('--cuda', default="on", type=str, help='switch on/off cuda o
 parser.add_argument('--aug', default='off', type=str, help='turn on img augmentation (default: False)')
 parser.add_argument('--load', default='default', type=str, help='load a pretrained model')
 parser.add_argument('--save_dir', type=str, default='experiments/')
-parser.add_argument('--refine_dir', type=str, default='experiments/GlaS_10labeled_round1/refine_inst_pred/')
+parser.add_argument('--refine_dir', type=str, default='experiments/CRAG_10labeled_round1/refine_inst_pred/')
 parser.add_argument('--crop', type=int, default=448)
 parser.add_argument('--imgsize', type=int, default=448)
 parser.add_argument('--gray', default='no', type=str)
 parser.add_argument('--device', default='cuda:3', type=str)
 parser.add_argument('--gpu', type=list, default=[3], help='GPUs for training')
-parser.add_argument('--round', type=int, default=2, help='number of round for self-training process')
+parser.add_argument('--round', type=int, default=3, help='number of round for self-training process')
 
 parser.add_argument('--gamma1', type=float, default=1, help='weight for dice loss')
 parser.add_argument('--gamma2', type=float, default=0.5, help='weight for object-level dice loss')
@@ -103,11 +103,13 @@ def main():
         # img_dir = '/home/data2/MedImg/GlandSeg/%s/wzh/train/480x480/Images/' % (args.dataset)
         # target_dir = '/home/data2/MedImg/GlandSeg/%s/wzh/train/480x480/Annotation/' % (args.dataset)
         ## GlaS
-        img_dir = '/home/data2/MedImg/GlandSeg/%s/train/Images' % (args.dataset)
-        target_dir = '/home/data2/MedImg/GlandSeg/%s/train/Annotation' % (args.dataset)
-        ## CRAG
-        # img_dir = '/home/data2/MedImg/GlandSeg/%s/train/TrainSet/Images' % (args.dataset)
-        # target_dir = '/home/data2/MedImg/GlandSeg/%s/train/TrainSet/Annotation' % (args.dataset)
+        if args.dataset == 'GlaS':
+            img_dir = '/home/data2/MedImg/GlandSeg/%s/train/Images' % (args.dataset)
+            target_dir = '/home/data2/MedImg/GlandSeg/%s/train/Annotation' % (args.dataset)
+        elif args.dataset == 'CRAG':
+            ## CRAG
+            img_dir = '/home/data2/MedImg/GlandSeg/%s/train/TrainSet/Images' % (args.dataset)
+            target_dir = '/home/data2/MedImg/GlandSeg/%s/train/TrainSet/Annotation' % (args.dataset)
         dir_list = [img_dir, target_dir]
         # post_fix = ['weight.png', 'label.png']
         if x == 'train':

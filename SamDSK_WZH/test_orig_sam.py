@@ -26,10 +26,10 @@ parser.add_argument('--checkpoint', type=str, default=None, help='start from che
 parser.add_argument('--checkpoint_freq', type=int, default=10, help='epoch to save checkpoints')
 parser.add_argument('--epochs', type=int, default=100, help='number of epochs to train')
 parser.add_argument('--save_dir', type=str, default='./experimentsP')
-parser.add_argument('--img_dir', type=str, default='/home/data2/MedImg/GlandSeg/GlaS/train/Images')
-parser.add_argument('--label_dir', type=str, default='/home/data2/MedImg/GlandSeg/GlaS/train/Annotation')
+parser.add_argument('--img_dir', type=str, default='/home/data2/MedImg/GlandSeg/CRAG/train/Images')
+parser.add_argument('--label_dir', type=str, default='/home/data2/MedImg/GlandSeg/CRAG/train/Annotation')
 # parser.add_argument('--prompt_dir', type=str, default='/home/data2/MedImg/GlandSeg/GlaS/test/Prompts', help='.mat file, contain point and box prompt')
-parser.add_argument('--prompt_dir', type=str, default='experiments/GlaS_10labeled/BoxPrompt/', help='.mat file, contain point and box prompt')
+parser.add_argument('--prompt_dir', type=str, default='experiments/CRAG_10labeled_round1/BoxPrompt/', help='.mat file, contain point and box prompt')
 
 parser.add_argument('--desc', type=str, default='SAM')
 
@@ -37,7 +37,7 @@ parser.add_argument('--model', type=str, default="vit_h")
 parser.add_argument('--model_path', type=str,
                     default="/home/data1/my/Project/segment-anything-main/sam_vit_h.pth", help='model weights for SAM model')
 
-parser.add_argument('--dataset', type=str, choices=['GlaS', 'CRAG'], default='GlaS', help='which dataset be used')
+parser.add_argument('--dataset', type=str, choices=['GlaS', 'CRAG'], default='CRAG', help='which dataset be used')
 parser.add_argument('--gpu', type=list, default=[3], help='GPUs for training')
 
 # 后处理参数
@@ -162,9 +162,11 @@ def main():
 
         if eval_flag:
             # label_img = scio.loadmat('{:s}/{:s}.mat'.format(label_dir, name))['inst_map']
-            label_img = cv2.imread('{:s}/{:s}_anno.bmp'.format(label_dir, name))[:, :, 0]
+            if args.dataset == 'GlaS':
+                label_img = cv2.imread('{:s}/{:s}_anno.bmp'.format(label_dir, name))[:, :, 0]
+            elif args.dataset == 'CRAG':
+                label_img = cv2.imread('{:s}/{:s}.png'.format(label_dir, name))[:, :, 0]
             label_img = np.array(label_img != 0, dtype=np.uint8)
-
 
         if eval_flag:
             img_show = np.concatenate([np.array(orig_img),
