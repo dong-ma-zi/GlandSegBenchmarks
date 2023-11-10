@@ -12,18 +12,18 @@ import argparse
 from multiprocessing import Array, Process
 # from models.sam_orig import SamPredictor, sam_model_registry
 from models.sam import SamPredictor, sam_model_registry
-import cv2
+# import cv2
 from utils import *
 import scipy.io as scio
 
 parser = argparse.ArgumentParser(description="Testing oeem segmentation Model")
 parser.add_argument('--save_dir', type=str, default='./experimentsBoxes')
 
-parser.add_argument('--img_dir', type=str, default='/home/data2/MedImg/GlandSeg/GlaS/test_proc/Images')
-parser.add_argument('--label_dir', type=str, default='/home/data2/MedImg/GlandSeg/GlaS/test_proc/Annotation')
+# parser.add_argument('--img_dir', type=str, default='/home/data2/MedImg/GlandSeg/GlaS/test_proc/Images')
+# parser.add_argument('--label_dir', type=str, default='/home/data2/MedImg/GlandSeg/GlaS/test_proc/Annotation')
 
-# parser.add_argument('--img_dir', type=str, default='/home/data2/MedImg/NucleiSeg/MoNuSeg/Test/Images')
-# parser.add_argument('--label_dir', type=str, default='/home/data2/MedImg/NucleiSeg/MoNuSeg/Test/Annotation/')
+parser.add_argument('--img_dir', type=str, default='/home/data2/MedImg/NucleiSeg/MoNuSeg/Test/Images')
+parser.add_argument('--label_dir', type=str, default='/home/data2/MedImg/NucleiSeg/MoNuSeg/Test/Annotation/')
 
 parser.add_argument('--mode', type=str,
                     default='adpt',
@@ -38,15 +38,22 @@ parser.add_argument('--model_path', type=str,
                     # w/o finetuning
                     # default=None
                     # glas orig sam
+                    # default="/home/data1/my/Project/GlandSegBenchmark/Medical-SAM-Adapter/logs_boxes_mod1107/glas-samOrig-b-1024-16-256_2023_11_08_10_32/Model/checkpoint_99.pth"
+                    # default="/home/data1/my/Project/GlandSegBenchmark/Medical-SAM-Adapter/logs_boxes_mod1107/glas-samOrig-h-1024-16-256_2023_11_08_21_38/Model/checkpoint_50.pth"
                     # glas adpt sam
-                    default="/home/data1/my/Project/GlandSegBenchmark/Medical-SAM-Adapter/logs_boxes_mod1107/glas-samAdpt-b-1024-16-256_2023_11_07_14_16/Model/checkpoint_100.pth"
+                    # default="/home/data1/my/Project/GlandSegBenchmark/Medical-SAM-Adapter/logs_boxes_mod1107/glas-samAdpt-b-1024-16-256_2023_11_07_14_16/Model/checkpoint_100.pth"
+                    # default="/home/data1/my/Project/GlandSegBenchmark/Medical-SAM-Adapter/logs_boxes_mod1107/glas-samAdpt-h-1024-16-256_2023_11_08_18_26/Model/checkpoint_50.pth"
                     # monuseg orig sam
+                    # default="/home/data1/my/Project/GlandSegBenchmark/Medical-SAM-Adapter/logs_boxes_mod1107/monuseg-samOrig-b-1024-16-256_2023_11_08_00_00/Model/checkpoint_50.pth"
                     # monuseg adpt sam
-                    # default="/home/data1/my/Project/GlandSegBenchmark/Medical-SAM-Adapter/logs_box_p/monuseg-samAdpt-b-1024-16-256_2023_11_05_21_11/Model/checkpoint_30.pth"
+                    default="/home/data1/my/Project/GlandSegBenchmark/Medical-SAM-Adapter/logs_boxes_mod1107/monuseg-samAdpt-b-1024-16-256_2023_11_08_00_03/Model/checkpoint_20.pth"
                     )
 
-parser.add_argument('--dataset', type=str, choices=['GlaS', 'MoNuSeg'], default='GlaS', help='which dataset be used')
-parser.add_argument('--gpu', type=list, default=[1, ], help='GPUs for training')
+parser.add_argument('--dataset', type=str, choices=['GlaS', 'MoNuSeg'], default='MoNuSeg', help='which dataset be used')
+parser.add_argument('--gpu', type=list, default=[0, ], help='GPUs for training')
+
+# auto prompt
+parser.add_argument('--auto_prompt', type=bool, default=True)
 
 # 后处理参数
 parser.add_argument('--min_area', type=int, default=32, help='minimum area for an object')
@@ -96,6 +103,9 @@ def main():
     else:
         save_dir = "%s/%s_%s" % (args.save_dir, args.dataset, args.desc)
 
+    if args.auto_prompt:
+        save_dir += '_auto_prop'
+
     model_path = args.model_path
     save_flag = True
     points_batch_size = 8
@@ -113,10 +123,12 @@ def main():
         nuclei_pq = 0
 
     # model init
-    # model = sam_model_registry['vit_h']().cuda()
     # model = sam_model_registry['vit_b']\
     #     (checkpoint="/home/data1/my/Project/segment-anything-main/sam_vit_b.pth").cuda()
-    model = sam_model_registry['vit_b'](args).cuda()
+    if args.mode == 'orig':
+        model = sam_model_registry['vit_b']().cuda()
+    if args.mode == 'adpt':
+        model = sam_model_registry['vit_b'](args).cuda()
 
     if args.model_path:
         epoch = os.path.basename(model_path).split('.')[0].split('_')[-1]
@@ -159,14 +171,30 @@ def main():
         per_img_mask_list = []
         iou_pred_list = []
         inst_id = 1
-        label_path = '{:s}/{:s}_anno.bmp'.format(label_dir, name)
-        inst_label = np.array(Image.open(label_path))
-        # inst_label = scio.loadmat('{:s}/{:s}.mat'.format(label_dir, name))['inst_map']
+        if args.dataset == 'GlaS':
+            label_path = '{:s}/{:s}_anno.bmp'.format(label_dir, name)
+            inst_label = np.array(Image.open(label_path))
+        elif args.dataset == 'MoNuSeg':
+            inst_label = scio.loadmat('{:s}/{:s}.mat'.format(label_dir, name))['inst_map']
 
         ''' preprocess '''
         input_image, original_image_size, input_size = img_preprocessing(image, model)
-        boxes_orig_scale, masks = generate_boxes_prompt_all_inst(inst_label)
-        boxes = get_scaled_prompt(boxes_orig_scale, model, original_image_size)
+        # load or generate prompt
+        if args.auto_prompt:
+            with open(os.path.join('/home/data1/my/Project/yolov5/runs/detect/exp/labels/', name + '.txt'), 'r') as f:
+                lines = f.readlines()
+                boxes_orig_scale = np.zeros(shape=(len(lines), 4))
+                for box_idx, line in enumerate(lines):
+                    _, x, y, box_w, box_h = line.replace('\n', '').split(' ')
+                    miny = float(x) * w - 0.5 * float(box_w) * w
+                    maxy = float(x) * w + 0.5 * float(box_w) * w
+                    minx = float(y) * h - 0.5 * float(box_h) * h
+                    maxx = float(y) * h + 0.5 * float(box_h) * h
+                    boxes_orig_scale[box_idx] = np.array([miny, minx, maxy, maxx])
+            boxes = get_scaled_prompt(boxes_orig_scale, model, original_image_size)
+        else:
+            boxes_orig_scale, masks = generate_boxes_prompt_all_inst(inst_label)
+            boxes = get_scaled_prompt(boxes_orig_scale, model, original_image_size)
 
         box_num = boxes.shape[0]
         if box_num % points_batch_size == 0:
@@ -230,7 +258,9 @@ def main():
             pred_vis = draw_rand_inst_color(inst_pred)
 
             for box in boxes_orig_scale:
-                cv2.rectangle(pred_vis, (box[0], box[1]), (box[2], box[3]), (0, 0, 255), 3)
+                cv2.rectangle(pred_vis,
+                              (round(box[0]), round(box[1])),
+                              (round(box[2]), round(box[3])), (0, 0, 255), 3)
 
             img_show = np.concatenate([np.array(orig_img),
                                        label_vis,
@@ -264,7 +294,8 @@ def main():
                 print('AJI: {r[0]:.4f}\n'
                       'PQ: {r[1]:.4f}'.format(r=[aji_img, dq_sq_pq[2]]))
 
-    over_all_iou, over_all_f1 = get_overall_valid_score('{:s}'.format(prob_maps_folder), args.label_dir)
+    over_all_iou, over_all_f1 = get_overall_valid_score('{:s}'.format(prob_maps_folder), args.label_dir,
+                                                        dataset_name=args.dataset)
 
     # semantic
     avg_pq = []
@@ -330,7 +361,7 @@ def chunks(lst, num_workers=None, n=None):
         return chunk_list
 
 
-def get_overall_valid_score(pred_image_path, groundtruth_path, num_workers=1, num_class=2):
+def get_overall_valid_score(pred_image_path, groundtruth_path, dataset_name, num_workers=1, num_class=2):
     """
     get the scores with validation groundtruth, the background will be masked out
     and return the score for all photos
@@ -356,8 +387,10 @@ def get_overall_valid_score(pred_image_path, groundtruth_path, num_workers=1, nu
         for im_name in image_list:
             cam = np.load(os.path.join(pred_image_path, f"{im_name}.npy"), allow_pickle=True).astype(np.uint8).reshape(-1)
 
-            groundtruth = np.asarray(Image.open(groundtruth_path + f"/{im_name}_anno.bmp"))
-            # groundtruth = scio.loadmat(groundtruth_path + f"/{im_name}.mat")['inst_map']
+            if dataset_name == 'GlaS':
+                groundtruth = np.asarray(Image.open(groundtruth_path + f"/{im_name}_anno.bmp"))
+            elif dataset_name == 'MoNuSeg':
+                groundtruth = scio.loadmat(groundtruth_path + f"/{im_name}.mat")['inst_map']
             groundtruth = np.array(groundtruth != 0, dtype=np.uint8).reshape(-1)
 
             gt_list.extend(groundtruth)

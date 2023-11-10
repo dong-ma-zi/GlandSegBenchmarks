@@ -19,7 +19,7 @@ args = cfg.parse_args()
 os.environ['CUDA_VISIBLE_DEVICES'] = ','.join(str(x) for x in [args.gpu_device])
 GPUdevice = torch.device('cuda', args.gpu_device)
 '''load and load pretrained model'''
-net = get_network(args, args.net, vit_mode='vit_b', gpu_device=GPUdevice,)
+net = get_network(args, args.net, vit_mode='vit_h', gpu_device=GPUdevice,)
 
 # load pretrained weights
 # net.load_state_dict(torch.load("/home/data1/my/Project/GlandSegBenchmark/Medical-SAM-Adapter/logs_p_ck1106/"
@@ -32,19 +32,21 @@ net = get_network(args, args.net, vit_mode='vit_b', gpu_device=GPUdevice,)
 #                                "monuseg-samAdpt-b-1024-16-256-cent_2023_11_06_15_10/"
 #                                "Model/checkpoint_30.pth", map_location='cpu')['state_dict'])
 
-# # n_list = [n for n, _ in net.named_parameters()]
-# for n, value in net.image_encoder.named_parameters():
-#     if "Adapter" not in n:
-#         value.requires_grad = False
-#     else:
-#         print('training para: ', n)
+if args.net == 'sam_adpt':
+    # n_list = [n for n, _ in net.named_parameters()]
+    for n, value in net.image_encoder.named_parameters():
+        if "Adapter" not in n:
+            value.requires_grad = False
+        else:
+            print('training para: ', n)
 
-# n_list = [n for n, _ in net.named_parameters()]
-for n, value in net.named_parameters():
-    if "mask_decoder" not in n:
-        value.requires_grad = False
-    else:
-        print('training para: ', n)
+elif args.net == 'sam_orig':
+    # n_list = [n for n, _ in net.named_parameters()]
+    for n, value in net.named_parameters():
+        if "mask_decoder" not in n:
+            value.requires_grad = False
+        else:
+            print('training para: ', n)
 
 
 optimizer = optim.Adam([p for p in net.parameters() if p.requires_grad == True],
