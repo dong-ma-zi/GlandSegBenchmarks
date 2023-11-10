@@ -1,4 +1,4 @@
-
+import cv2
 import numpy as np
 import math
 import random
@@ -569,6 +569,49 @@ def split_forward(model, input, size, overlap, outchannel=3):
     output = output[:,:,:h0,:w0].cuda()
 
     return output
+
+
+def draw_rand_inst_overlay(ori_img_, inst_map_, rand_color=True, draw_center=False):
+    img = np.copy(ori_img_).astype(np.uint8)
+    img = np.ascontiguousarray(img)
+    # img = cv2.resize(img, (512, 512), interpolation=cv2.INTER_CUBIC)
+
+    inst_map = np.copy(inst_map_)
+    # inst_map = cv2.resize(inst_map, (512, 512), interpolation=cv2.INTER_NEAREST)
+
+    insts = np.unique(inst_map).tolist()
+    if 0 in insts:
+        insts.remove(0)
+    for ins in insts:
+        inst_mask = np.copy(inst_map)
+        inst_mask[inst_mask != ins] = 0
+
+
+        inst_mask[inst_mask > 0] = 255
+        inst_mask = inst_mask.astype(np.uint8)
+        contours, hierarchy = cv2.findContours(inst_mask, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+        for contour in range(len(contours)):
+            if draw_center:
+                M = cv2.moments(contours[contour])
+                try:
+                    center_x = int(M["m10"] / M["m00"])
+                    center_y = int(M["m01"] / M["m00"])
+                except:
+                    continue
+                img = cv2.circle(img, (center_x, center_y), 6, (255, 0, 0), -1)
+
+            if rand_color:
+                R = random.randint(0, 255)
+                G = random.randint(0, 255)
+                B = random.randint(0, 255)
+                color = [R, G, B]
+            else:
+                color = [0, 255, 255]
+
+            img = cv2.drawContours(img, contours, contour, color, 2, 8)
+
+    # img = cv2.resize(img, (256, 256), interpolation=cv2.INTER_CUBIC)
+    return img
 
 
 def get_random_color():

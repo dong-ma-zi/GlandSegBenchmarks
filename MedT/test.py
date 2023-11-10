@@ -7,12 +7,12 @@ import os
 import numpy as np
 import torch
 from torchvision import transforms as T
-from utils import JointTransform2D, ImageToImage2D, Image2D
 from skimage.segmentation import watershed
 import torch.nn.functional as F
 import math
 import cv2
-import utils
+from my_utils import gland_accuracy_object_level_all_images, gland_accuracy_object_level, \
+    accuracy_pixel_level, draw_rand_inst_overlay
 from scipy import ndimage
 import skimage.morphology as morph
 from scipy.ndimage.morphology import binary_fill_holes
@@ -25,6 +25,8 @@ parser.add_argument('--cuda', default="on", type=str, help='switch on/off cuda o
 parser.add_argument('--modelname', default='swinUnet', type=str, help='type of model')
 
 parser.add_argument('--save_dir', type=str, default='./experiments/')
+parser.add_argument('--mask_save_dir', type=str, default='./experiments/GlaS/Image_segmentation/')
+parser.add_argument('--overlay_save_dir', type=str, default='./experiments/GlaS/overlay/')
 parser.add_argument('--img_dir', type=str, default='/home/data2/MedImg/GlandSeg/GlaS/test/Images')
 parser.add_argument('--label_dir', type=str, default='/home/data2/MedImg/GlandSeg/GlaS/test/Annotation')
 parser.add_argument('--dataset', type=str, choices=['GlaS', 'CRAG'], default='GlaS', help='which dataset be used')
@@ -103,12 +105,13 @@ def main():
     if not os.path.exists(save_dir):
         os.mkdir(save_dir)
 
-    img_save_dir = "%s/%s/Image_segmentation" % (args.save_dir, args.dataset)
-    if not os.path.exists(img_save_dir):
-        os.mkdir(img_save_dir)
+    if not os.path.exists(args.mask_save_dir):
+        os.mkdir(args.mask_save_dir)
+    if not os.path.exists(args.overlay_save_dir):
+        os.mkdir(args.overlay_save_dir)
 
     with torch.no_grad():
-        validate(valloader, model, save_dir, img_save_dir)
+        validate(valloader, model, save_dir)
 
 
 def proc(inst_raw):
@@ -143,7 +146,7 @@ def proc(inst_raw):
     return output_map
 
 
-def validate(val_loader, model, save_dir, img_save_dir):
+def validate(val_loader, model, save_dir):
     accumulated_metrics = np.zeros(11)
     all_results = dict()
 
@@ -168,8 +171,8 @@ def validate(val_loader, model, save_dir, img_save_dir):
             label_path = '{:s}/{:s}.png'.format(args.label_dir, name)
         label_img = io.imread(label_path)
 
-        for h_ in range(0, padding_h - stride + 1, int(stride // 1)):
-            for w_ in range(0, padding_w - stride + 1, int(stride // 1)):
+        for h_ in range(0, padding_h - stride + 1, int(stride // 4)):
+            for w_ in range(0, padding_w - stride + 1, int(stride // 4)):
                 img_padding = np.zeros((args.imgsize, args.imgsize, 3), np.uint8)
                 slice = image[h_:h_ + args.imgsize, w_:w_ + args.imgsize, :]
                 t_h, t_w, _ = slice.shape
@@ -201,23 +204,29 @@ def validate(val_loader, model, save_dir, img_save_dir):
         # pred_labeled = proc(output[0, 1, :, :])
 
         print('\tComputing metrics...')
-        result = utils.accuracy_pixel_level(np.expand_dims(pred_labeled > 0, 0), np.expand_dims(label_img > 0, 0))
+        result = accuracy_pixel_level(np.expand_dims(pred_labeled > 0, 0), np.expand_dims(label_img > 0, 0))
         pixel_accu = result[0]
 
-        # single_image_result = utils.gland_accuracy_object_level(pred_labeled, label_img)
+        # single_image_result = gland_accuracy_object_level(pred_labeled, label_img)
         objF1, _, _, _ = ObjectF1score(pred_labeled, label_img)
         objDice = ObjectDice(pred_labeled, label_img)
         dice = Dice(np.where(pred_labeled>0, 1, 0), np.where(label_img>0, 1, 0))
         objHaus = ObjectHausdorff(pred_labeled, label_img)
         single_image_result = (objF1, objDice, dice, objHaus)
-        accumulated_metrics += utils.gland_accuracy_object_level_all_images(pred_labeled, label_img)
+        accumulated_metrics += gland_accuracy_object_level_all_images(pred_labeled, label_img)
         all_results[name] = tuple([pixel_accu, *single_image_result])
 
         # save image
         if save_flag:
             print('\tSaving image results...')
+            ## draw semantic mask
             final_pred = pred_labeled.astype(np.uint8) * 100
-            cv2.imwrite('{:s}/{:s}_seg.jpg'.format(img_save_dir, name), final_pred)
+            cv2.imwrite('{:s}/{:s}_seg.jpg'.format(args.mask_save_dir, name), final_pred)
+
+            ## draw overlay
+            overlay = draw_rand_inst_overlay(image, pred_labeled)
+            cv2.imwrite('{:s}/{:s}_seg.jpg'.format(args.overlay_save_dir, name), overlay)
+
 
         # 打印每张test的指标
         print('Pixel Acc: {r[0]:.4f}\n'
