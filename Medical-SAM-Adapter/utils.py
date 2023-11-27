@@ -1272,4 +1272,4 @@ def non_max_suppression(mask_list, score, nms_thresh):
     idxs = torchvision.ops.nms(predict_boxes_list, score, nms_thresh)
 
     # return mask_list[idxs.numpy()]
-    return [mask_list[i] for i in idxs.numpy()]
+    return [mask_list[i] for i in idxs.numpy()], idxs.numpy()

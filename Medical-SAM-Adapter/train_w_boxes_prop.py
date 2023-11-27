@@ -53,68 +53,36 @@ logger = create_logger(args.path_helper['log_path'])
 logger.info(args)
 
 
-# ----- define augmentation ----- #
-# data_transforms = {
-#     'train': get_transforms({
-#     'horizontal_flip': True,
-#     'vertical_flip': True,
-#     # 'random_elastic': [6, 15],
-#     'random_rotation': 90,
-#     'to_tensor': 1,
-#     # 'normalize': [[0.787, 0.511, 0.785], [0.167, 0.248, 0.131]],
-# }),
-#     'val': get_transforms({
-#     'to_tensor': 1,
-#     # 'normalize': [[0.787, 0.511, 0.785], [0.167, 0.248, 0.131]],
-# })}
-
-# # ----- load data ----- #
-# data_path = {'train': '/home/data2/MedImg/GlandSeg/GlaS/my/train/448x448',
-#              'val': '/home/data2/MedImg/GlandSeg/GlaS/my/valid/448x448'}
-
-# data_path = {'train': '/home/data2/MedImg/NucleiSeg/MoNuSeg/extracted_mirror/train/512x512_256x256/',
-#              'val': '/home/data2/MedImg/NucleiSeg/MoNuSeg/Test'}
-
-# dsets = {}
-# for x in ['train', 'val']:
-#     img_dir = os.path.join(data_path[x], 'Images')
-#     target_dir = os.path.join(data_path[x], 'Annotation')
-#
-#     dir_list = [img_dir, target_dir]
-#     dsets[x] = DataFolder(dir_list # , data_transform=data_transforms[x]
-#                           )
-#
-# train_loader = DataLoader(dsets['train'], batch_size=1, shuffle=True,
-#                           num_workers=4)
-# val_loader = DataLoader(dsets['val'], batch_size=1, shuffle=False,
-#                         num_workers=4)
-
-
 
 # ----- load data ----- #
 
 # data_path = {'train': '/home/data2/MedImg/GlandSeg/GlaS/train',
 #              'val': '/home/data2/MedImg/GlandSeg/GlaS/test_proc'}
 
-data_path = {'train': '/home/data2/MedImg/NucleiSeg/MoNuSeg/Train',
-             'val': '/home/data2/MedImg/NucleiSeg/MoNuSeg/Test'}
+# data_path = {'train': '/home/data2/MedImg/NucleiSeg/MoNuSeg/Train',
+#              'val': '/home/data2/MedImg/NucleiSeg/MoNuSeg/Test'}
 
+# data_path = {'train': '/home/data1/my/dataset/consep/Train',
+#              'val': '/home/data1/my/dataset/consep/Test'}
+
+data_path = {'train': '/home/data1/my/dataset/monusac/Train',
+             'val': '/home/data1/my/dataset/monusac/Test'}
 
 train_img_list = sorted(glob.glob(os.path.join(data_path['train'], 'Images/*')))
 train_anno_list = []
 for i in train_img_list:
     img_name = os.path.basename(i).split('.')[0]
     # train_anno_list += [os.path.join(data_path['train'], 'Annotation', img_name + '_anno.bmp')]
-    train_anno_list += [os.path.join(data_path['train'], 'Annotation', img_name + '.mat')]
-# train_anno_list = sorted(glob.glob(os.path.join(data_path['train'], 'Annotation/*')))
+    # train_anno_list += [os.path.join(data_path['train'], 'Annotation', img_name + '.mat')]
+    train_anno_list += [os.path.join(data_path['train'], 'Labels', img_name + '.mat')]
 
 val_img_list = sorted(glob.glob(os.path.join(data_path['val'], 'Images/*')))
 val_anno_list = []
 for i in val_img_list:
     img_name = os.path.basename(i).split('.')[0]
     # val_anno_list += [os.path.join(data_path['val'], 'Annotation', img_name + '_anno.bmp')]
-    val_anno_list += [os.path.join(data_path['val'], 'Annotation', img_name + '.mat')]
-# val_anno_list = sorted(glob.glob(os.path.join(data_path['val'], 'Annotation/*')))
+    # val_anno_list += [os.path.join(data_path['val'], 'Annotation', img_name + '.mat')]
+    val_anno_list += [os.path.join(data_path['val'], 'Labels', img_name + '.mat')]
 
 # '''checkpoint path and tensorboard'''
 # # iter_per_epoch = len(Glaucoma_training_loader)

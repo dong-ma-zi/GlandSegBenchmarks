@@ -1,30 +1,35 @@
-import numpy as np
+# import numpy as np
 import torch.nn.functional as F
-import skimage.morphology as morph
-from skimage.measure import label
-from skimage import measure, io
+# import skimage.morphology as morph
+# from skimage.measure import label
+# from skimage import measure, io
 import utils
 from metrics import dice_coefficient, iou_metrics
 from transforms import ResizeLongestSide
-from scipy import ndimage
+# from scipy import ndimage
 # import torchvision.transforms as transforms
 import argparse
 from multiprocessing import Array, Process
 # from models.sam_orig import SamPredictor, sam_model_registry
 from models.sam import SamPredictor, sam_model_registry
-import cv2
+# import cv2
 from utils import *
 import scipy.io as scio
 
 parser = argparse.ArgumentParser(description="Testing oeem segmentation Model")
-
 parser.add_argument('--save_dir', type=str, default='./experimentsP')
 
 # parser.add_argument('--img_dir', type=str, default='/home/data2/MedImg/GlandSeg/GlaS/test_proc/Images')
 # parser.add_argument('--label_dir', type=str, default='/home/data2/MedImg/GlandSeg/GlaS/test_proc/Annotation')
 
-parser.add_argument('--img_dir', type=str, default='/home/data2/MedImg/NucleiSeg/MoNuSeg/Test/Images')
-parser.add_argument('--label_dir', type=str, default='/home/data2/MedImg/NucleiSeg/MoNuSeg/Test/Annotation/')
+# parser.add_argument('--img_dir', type=str, default='/home/data2/MedImg/NucleiSeg/MoNuSeg/Test/Images')
+# parser.add_argument('--label_dir', type=str, default='/home/data2/MedImg/NucleiSeg/MoNuSeg/Test/Annotation/')
+
+# parser.add_argument('--img_dir', type=str, default='/home/data1/my/dataset/consep/Test/Images/')
+# parser.add_argument('--label_dir', type=str, default='/home/data1/my/dataset/consep/Test/Labels/')
+
+parser.add_argument('--img_dir', type=str, default='/home/data1/my/dataset/monusac/Test/Images/')
+parser.add_argument('--label_dir', type=str, default='/home/data1/my/dataset/monusac/Test/Labels/')
 
 parser.add_argument('--mode', type=str,
                     default='adpt',
@@ -48,17 +53,26 @@ parser.add_argument('--model_path', type=str,
                     # default="/home/data1/my/Project/GlandSegBenchmark/Medical-SAM-Adapter/logs_points_mod1107/monuseg-samOrig-b-1024-16-256_2023_11_07_13_00/Model/checkpoint_50.pth"
                     # default="/home/data1/my/Project/GlandSegBenchmark/Medical-SAM-Adapter/logs_p/monuseg-samOrig-h-1024-16-256_2023_11_01_15_49/Model/checkpoint_40.pth"
                     # monuseg adpt sam
-                    default="/home/data1/my/Project/GlandSegBenchmark/Medical-SAM-Adapter/logs_points_mod1107/monuseg-samAdpt-b-1024-16-256_2023_11_07_13_02/Model/checkpoint_50.pth"
+                    # default="/home/data1/my/Project/GlandSegBenchmark/Medical-SAM-Adapter/logs_points_mod1107/monuseg-samAdpt-b-1024-16-256_2023_11_07_13_02/Model/checkpoint_50.pth"
+                    # consep orig sam
+                    # default="/home/data1/my/Project/GlandSegBenchmark/Medical-SAM-Adapter/logs_points_mod1107/consep-samOrig-b-1024-16-256_2023_11_13_18_37/Model/checkpoint_99.pth"
+                    # consep adpt sam
+                    # default="/home/data1/my/Project/GlandSegBenchmark/Medical-SAM-Adapter/logs_points_mod1107/consep-samAdpt-b-1024-16-256_2023_11_13_17_18/Model/checkpoint_99.pth"
+                    # monusac orig sam
+                    # default="/home/data1/my/Project/GlandSegBenchmark/Medical-SAM-Adapter/logs_points_mod1107/monusac-samOrig-b-1024-16-256_2023_11_21_20_25/Model/checkpoint_50.pth"
+                    # monusac
+                    default="/home/data1/my/Project/GlandSegBenchmark/Medical-SAM-Adapter/logs_points_mod1107/monusac-samAdpt-b-1024-16-256_2023_11_21_20_32/Model/checkpoint_50.pth"
                     )
 
-parser.add_argument('--dataset', type=str, choices=['GlaS', 'MoNuSeg'], default='MoNuSeg', help='which dataset be used')
-parser.add_argument('--gpu', type=list, default=[1, ], help='GPUs for training')
+parser.add_argument('--dataset', type=str, choices=['GlaS', 'MoNuSeg', 'CoNSeP', 'MoNuSAC'],
+                    default='MoNuSAC', help='which dataset be used')
+parser.add_argument('--gpu', type=list, default=[3, ], help='GPUs for training')
 
 # auto prompt
-parser.add_argument('--auto_prompt', type=bool, default=True)
+parser.add_argument('--auto_prompt', type=bool, default=False)
 
 # 后处理参数
-parser.add_argument('--min_area', type=int, default=400, help='minimum area for an object')
+parser.add_argument('--min_area', type=int, default=0, help='minimum area for an object')
 # parser.add_argument('--radius', type=int, default=4)
 args = parser.parse_args()
 
@@ -94,7 +108,7 @@ def get_scaled_prompt(points, sam, original_image_size, if_transform: bool = Tru
     return points
 
 def main():
-    assert args.dataset in ['GlaS', 'MoNuSeg']
+    assert args.dataset in ['GlaS', 'MoNuSeg', 'CoNSeP', 'MoNuSAC']
     os.environ['CUDA_VISIBLE_DEVICES'] = ','.join(str(x) for x in args.gpu)
 
     img_dir = args.img_dir
@@ -104,8 +118,11 @@ def main():
     else:
         save_dir = "%s/%s_%s" % (args.save_dir, args.dataset, args.desc)
 
+    if not args.model_path:
+        save_dir += '-wo-ft'
+
     if args.auto_prompt:
-        save_dir += '_auto_prop'
+        save_dir += '_auto_prop_p2p'
 
     model_path = args.model_path
     save_flag = True
@@ -118,17 +135,19 @@ def main():
     if args.dataset == 'GlaS':
         accumulated_metrics = np.zeros(11)
         args.min_area = 400
-    if args.dataset == 'MoNuSeg':
+    # if args.dataset == 'MoNuSeg':
+    else:
         args.min_area = 32
         aji = 0
         nuclei_pq = 0
 
     # model init
-    # model = sam_model_registry['vit_b']\
-    #     (checkpoint="/home/data1/my/Project/segment-anything-main/sam_vit_b.pth").cuda()
-    if args.mode == 'orig':
+    if not args.model_path:
+        model = sam_model_registry['vit_b']\
+            (checkpoint="/home/data1/my/Project/segment-anything-main/sam_vit_b.pth").cuda()
+    elif args.mode == 'orig':
         model = sam_model_registry['vit_b']().cuda()
-    if args.mode == 'adpt':
+    elif args.mode == 'adpt':
         model = sam_model_registry['vit_b'](args).cuda()
 
     if args.model_path:
@@ -164,7 +183,7 @@ def main():
         # load test image
         print('=> Processing image {:s}'.format(img_name))
         img_path = '{:s}/{:s}'.format(img_dir, img_name)
-        orig_img = Image.open(img_path)
+        # orig_img = Image.open(img_path)
         name = os.path.splitext(img_name)[0]
 
         ########################### esenbling from multi-scale #################################
@@ -178,8 +197,15 @@ def main():
         if args.dataset == 'GlaS':
             label_path = '{:s}/{:s}_anno.bmp'.format(label_dir, name)
             inst_label = np.array(Image.open(label_path))
-        elif args.dataset == 'MoNuSeg':
+        elif args.dataset in ['MoNuSeg', 'CoNSeP']:
             inst_label = scio.loadmat('{:s}/{:s}.mat'.format(label_dir, name))['inst_map']
+        elif args.dataset == 'MoNuSAC':
+            # x = scio.loadmat('{:s}/{:s}.mat'.format(label_dir, name))
+            inst_label = scio.loadmat('{:s}/{:s}.mat'.format(label_dir, name))['inst_map']
+            cls_label = scio.loadmat('{:s}/{:s}.mat'.format(label_dir, name))['type_map']
+            inst_label[cls_label == 5] = 0
+            inst_label = remap_label(inst_label)
+        inst_label = inst_label.astype(np.int32)
 
         ''' preprocess '''
         input_image, original_image_size, input_size = img_preprocessing(image, model)
@@ -187,6 +213,8 @@ def main():
         if args.auto_prompt:
             pts_orig_scale = scio.loadmat(f'/home/data1/my/Project/CrowdCounting-P2PNet/'
                                           f'MoNuSeg_center_pred_dir/{name}.mat')['center_map']
+            # pts_orig_scale = scio.loadmat(f'/home/data1/my/Project/CrowdCounting-P2PNet/'
+            #                               f'CoNSeP_center_pred_dir/{name}.mat')['center_map']
             pts = get_scaled_prompt(pts_orig_scale, model, original_image_size)
         else:
             pts_orig_scale, masks = generate_centroid_click_prompt_all_inst(inst_label)
@@ -242,7 +270,8 @@ def main():
         ############################### post proc ################################################
         # nms
         iou_pred_list = torch.cat(iou_pred_list, dim=0)
-        selected_masks = non_max_suppression(per_img_mask_list, iou_pred_list, 0.5)
+        selected_masks, _ = non_max_suppression(per_img_mask_list, iou_pred_list, 0.5)
+
         for per_inst_mask in selected_masks:
             res_mask[per_inst_mask == 1] = inst_id
             inst_id += 1
@@ -251,6 +280,12 @@ def main():
         filtered_label_image = morph.remove_small_objects(res_mask, min_size=args.min_area)
         # 将标签图像转换回二值图像
         sem_pred = (filtered_label_image > 0).astype(np.uint8)
+
+        if args.dataset == 'MoNuSAC':
+            filtered_label_image[cls_label == 5] = 0
+            filtered_label_image = morph.remove_small_objects(res_mask, min_size=args.min_area)
+            sem_pred = (filtered_label_image > 0).astype(np.uint8)
+
         # TODO: remap the
         inst_pred = utils.remap_label(filtered_label_image)
 
@@ -262,7 +297,7 @@ def main():
             for point in pts_orig_scale:
                 cv2.circle(pred_vis, (round(point[0]), round(point[1])), 3, (0, 0, 255), -1)
 
-            img_show = np.concatenate([np.array(orig_img),
+            img_show = np.concatenate([image, # np.array(orig_img),
                                        label_vis,
                                        pred_vis],
                                       axis=1)
@@ -286,7 +321,7 @@ def main():
             # get instance metrics
             if args.dataset == 'GlaS':
                 accumulated_metrics += utils.gland_accuracy_object_level_all_images(inst_pred, inst_label)
-            if args.dataset == 'MoNuSeg':
+            if args.dataset in ['MoNuSeg', 'CoNSeP', 'MoNuSAC']:
                 aji_img = utils.get_fast_aji(inst_label, inst_pred)
                 aji += aji_img
                 dq_sq_pq, _ = utils.get_fast_pq(inst_label, inst_pred)
@@ -328,7 +363,7 @@ def main():
         save_results(header, [F1, obj_dice, haus], {},
                      f'{save_dir:s}/test_result_epoch{epoch}_obj_dice_{obj_dice:.4f}_obj_haus_{haus:.4f}.txt')
 
-    elif args.dataset == 'MoNuSeg':
+    elif args.dataset in ['MoNuSeg', 'CoNSeP', 'MoNuSAC']:
         header = ['aji', 'pq']
         save_results(header, [aji / len(img_names), nuclei_pq / len(img_names)], {},
                      f'{save_dir:s}/test_result_epoch{epoch}_aji_{aji / len(img_names):.4f}_pq_{nuclei_pq / len(img_names):.4f}.txt')
@@ -391,8 +426,13 @@ def get_overall_valid_score(pred_image_path, groundtruth_path, dataset_name,
 
             if dataset_name == 'GlaS':
                 groundtruth = np.asarray(Image.open(groundtruth_path + f"/{im_name}_anno.bmp"))
-            elif dataset_name == 'MoNuSeg':
+            elif dataset_name in ['MoNuSeg', 'CoNSeP']:
                 groundtruth = scio.loadmat(groundtruth_path + f"/{im_name}.mat")['inst_map']
+            elif dataset_name == 'MoNuSAC':
+                groundtruth = scio.loadmat(groundtruth_path + f"/{im_name}.mat")['inst_map']
+                cls_gt = scio.loadmat(groundtruth_path + f"/{im_name}.mat")['type_map']
+                groundtruth[cls_gt == 5] = 0
+
             groundtruth = np.array(groundtruth != 0, dtype=np.uint8).reshape(-1)
 
             gt_list.extend(groundtruth)

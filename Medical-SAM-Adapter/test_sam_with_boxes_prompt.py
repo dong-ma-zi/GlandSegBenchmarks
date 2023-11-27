@@ -4,7 +4,7 @@ import skimage.morphology as morph
 from skimage.measure import label
 from skimage import measure, io
 import utils
-from metrics import dice_coefficient, iou_metrics
+from metrics import dice_coefficient, iou_metrics, generate_cls_info, run_nuclei_type_stat
 from transforms import ResizeLongestSide
 from scipy import ndimage
 # import torchvision.transforms as transforms
@@ -22,8 +22,14 @@ parser.add_argument('--save_dir', type=str, default='./experimentsBoxes')
 # parser.add_argument('--img_dir', type=str, default='/home/data2/MedImg/GlandSeg/GlaS/test_proc/Images')
 # parser.add_argument('--label_dir', type=str, default='/home/data2/MedImg/GlandSeg/GlaS/test_proc/Annotation')
 
-parser.add_argument('--img_dir', type=str, default='/home/data2/MedImg/NucleiSeg/MoNuSeg/Test/Images')
-parser.add_argument('--label_dir', type=str, default='/home/data2/MedImg/NucleiSeg/MoNuSeg/Test/Annotation/')
+# parser.add_argument('--img_dir', type=str, default='/home/data2/MedImg/NucleiSeg/MoNuSeg/Test/Images')
+# parser.add_argument('--label_dir', type=str, default='/home/data2/MedImg/NucleiSeg/MoNuSeg/Test/Annotation/')
+
+parser.add_argument('--img_dir', type=str, default='/home/data1/my/dataset/consep/Test/Images/')
+parser.add_argument('--label_dir', type=str, default='/home/data1/my/dataset/consep/Test/Labels/')
+
+# parser.add_argument('--img_dir', type=str, default='/home/data1/my/dataset/monusac/Test/Images/')
+# parser.add_argument('--label_dir', type=str, default='/home/data1/my/dataset/monusac/Test/Labels/')
 
 parser.add_argument('--mode', type=str,
                     default='adpt',
@@ -46,15 +52,31 @@ parser.add_argument('--model_path', type=str,
                     # monuseg orig sam
                     # default="/home/data1/my/Project/GlandSegBenchmark/Medical-SAM-Adapter/logs_boxes_mod1107/monuseg-samOrig-b-1024-16-256_2023_11_08_00_00/Model/checkpoint_50.pth"
                     # monuseg adpt sam
-                    default="/home/data1/my/Project/GlandSegBenchmark/Medical-SAM-Adapter/logs_boxes_mod1107/monuseg-samAdpt-b-1024-16-256_2023_11_08_00_03/Model/checkpoint_20.pth"
+                    # default="/home/data1/my/Project/GlandSegBenchmark/Medical-SAM-Adapter/logs_boxes_mod1107/monuseg-samAdpt-b-1024-16-256_2023_11_08_00_03/Model/checkpoint_20.pth"
+                    # consep orig sam
+                    # default="/home/data1/my/Project/GlandSegBenchmark/Medical-SAM-Adapter/logs_boxes_mod1107/consep-samOrig-b-1024-16-256_2023_11_13_23_50/Model/checkpoint_45.pth"
+                    # consep adpt sam
+                    default="/home/data1/my/Project/GlandSegBenchmark/Medical-SAM-Adapter/logs_boxes_mod1107/consep-samAdpt-b-1024-16-256_2023_11_13_23_46/Model/checkpoint_15.pth"
+                    # monusac
+                    # default="/home/data1/my/Project/GlandSegBenchmark/Medical-SAM-Adapter/logs_boxes_mod1107/monusac-samOrig-b-1024-16-256_2023_11_21_20_47/Model/checkpoint_30.pth"
+                    # monusac
+                    # default="/home/data1/my/Project/GlandSegBenchmark/Medical-SAM-Adapter/logs_boxes_mod1107/monusac-samAdpt-b-1024-16-256_2023_11_22_11_39/Model/checkpoint_30.pth"
                     )
 
-parser.add_argument('--dataset', type=str, choices=['GlaS', 'MoNuSeg'], default='MoNuSeg', help='which dataset be used')
-parser.add_argument('--gpu', type=list, default=[0, ], help='GPUs for training')
+parser.add_argument('--dataset', type=str, choices=['GlaS', 'MoNuSeg', 'CoNSeP','MoNuSAC'],
+                    default='CoNSeP', help='which dataset be used')
+parser.add_argument('--gpu', type=list, default=[2, ], help='GPUs for training')
 
 # auto prompt
 parser.add_argument('--auto_prompt', type=bool, default=True)
-
+parser.add_argument('--box_txt', type=str,
+                    # default='/home/data1/my/Project/yolov5/runs/detect/exp/labels/'
+                    # default='/home/data1/my/Project/nucleiDetCls/DeGPR/Detection/yolov5/runs/detect/exp/labels/'
+                    # default='/home/data1/my/Project/yolov5/runs/detect/exp3/labels/',
+                    # default='/home/data1/my/Project/yolov5/runs/detect/exp4/labels',
+                    # default='/home/data1/my/Project/nucleiDetCls/Deformable-DETR/output/monusac1200/test_labels/'
+                    default='/home/data1/my/Project/nucleiDetCls/Deformable-DETR/output/consep2400/test_labels/'
+                    )
 # 后处理参数
 parser.add_argument('--min_area', type=int, default=32, help='minimum area for an object')
 args = parser.parse_args()
@@ -73,6 +95,34 @@ def draw_rand_inst_color(inst_map):
         B = random.randint(0, 255)
         color_map[inst_map == ind, :] = [B, G, R]
     return color_map
+
+
+# color_dict = {1: [0, 255, 0], 2: [0, 0, 250], 3: [255, 144, 30]}
+color_dict = {1: [0, 0, 255], 2: [0, 255, 255], 3: [0, 255, 0], 4:[255, 0, 0]}
+def draw_inst_overlay(ori_img, inst_map, cls_map=None):
+    img = np.copy(ori_img).astype(np.uint8)
+    img = np.ascontiguousarray(img)
+    # img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
+
+    inst_map = np.copy(inst_map)
+    insts = np.unique(inst_map).tolist()
+    insts.remove(0)
+    for ins in insts:
+        inst_mask = np.copy(inst_map)
+        inst_mask[inst_mask != ins] = 0
+
+        if isinstance(cls_map, np.ndarray):
+            cls_num = list(set(cls_map[inst_mask == ins].flatten().tolist()))
+            color = color_dict[int(cls_num[0])]
+        else:
+            color = [0, 0, 0]
+        inst_mask[inst_mask > 0] = 255
+        inst_mask = inst_mask.astype(np.uint8)
+        contours, hierarchy = cv2.findContours(inst_mask, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+        for contour in range(len(contours)):
+            img = cv2.drawContours(img, contours, contour, color, 2, 8)
+
+    return img
 
 def img_preprocessing(image, sam):
     original_image_size = (image.shape[0], image.shape[1])
@@ -93,7 +143,7 @@ def get_scaled_prompt(boxes, sam, original_image_size, if_transform: bool = True
 
 
 def main():
-    assert args.dataset in ['GlaS', 'MoNuSeg']
+    assert args.dataset in ['GlaS', 'MoNuSeg', 'CoNSeP', 'MoNuSAC']
     os.environ['CUDA_VISIBLE_DEVICES'] = ','.join(str(x) for x in args.gpu)
 
     img_dir = args.img_dir
@@ -103,8 +153,11 @@ def main():
     else:
         save_dir = "%s/%s_%s" % (args.save_dir, args.dataset, args.desc)
 
+    if not args.model_path:
+        save_dir += '-wo-ft'
+
     if args.auto_prompt:
-        save_dir += '_auto_prop'
+        save_dir += '_auto_prop_defdetr'
 
     model_path = args.model_path
     save_flag = True
@@ -117,17 +170,21 @@ def main():
     if args.dataset == 'GlaS':
         accumulated_metrics = np.zeros(11)
         args.min_area = 400
-    if args.dataset == 'MoNuSeg':
+    # if args.dataset == 'MoNuSeg':
+    else:
         args.min_area = 32
         aji = 0
         nuclei_pq = 0
+        pred_dict = {}
+        true_dict = {}
 
     # model init
-    # model = sam_model_registry['vit_b']\
-    #     (checkpoint="/home/data1/my/Project/segment-anything-main/sam_vit_b.pth").cuda()
-    if args.mode == 'orig':
+    if not args.model_path:
+        model = sam_model_registry['vit_b'] \
+            (checkpoint="/home/data1/my/Project/segment-anything-main/sam_vit_b.pth").cuda()
+    elif args.mode == 'orig':
         model = sam_model_registry['vit_b']().cuda()
-    if args.mode == 'adpt':
+    elif args.mode == 'adpt':
         model = sam_model_registry['vit_b'](args).cuda()
 
     if args.model_path:
@@ -160,7 +217,7 @@ def main():
         # load test image
         print('=> Processing image {:s}'.format(img_name))
         img_path = '{:s}/{:s}'.format(img_dir, img_name)
-        orig_img = Image.open(img_path)
+        # orig_img = Image.open(img_path)
         name = os.path.splitext(img_name)[0]
 
         ########################### esenbling from multi-scale #################################
@@ -168,33 +225,66 @@ def main():
         image = np.array(image)
         h, w, _ = image.shape
         res_mask = np.zeros((h, w), np.int32)
+        res_cls_mask = np.zeros((h, w), np.int32)
         per_img_mask_list = []
         iou_pred_list = []
         inst_id = 1
         if args.dataset == 'GlaS':
             label_path = '{:s}/{:s}_anno.bmp'.format(label_dir, name)
             inst_label = np.array(Image.open(label_path))
-        elif args.dataset == 'MoNuSeg':
+        elif args.dataset  == 'MoNuSeg':
             inst_label = scio.loadmat('{:s}/{:s}.mat'.format(label_dir, name))['inst_map']
+        elif args.dataset == 'CoNSeP':
+            inst_label = scio.loadmat('{:s}/{:s}.mat'.format(label_dir, name))['inst_map']
+            cls_label_ = scio.loadmat('{:s}/{:s}.mat'.format(label_dir, name))['type_map']
+
+            # cls_label[(cls_label == 3) | (cls_label == 4)] = 3
+            # cls_label[(cls_label == 5) | (cls_label == 6) | (cls_label == 7)] = 4
+
+            cls_label = np.zeros_like(cls_label_)
+            cls_label[cls_label_ == 2] = 1
+            cls_label[(cls_label_ == 3) | (cls_label_ == 4)] = 2
+            cls_label[(cls_label_ == 5) | (cls_label_ == 6) | (cls_label_ == 7) | (cls_label_ == 1)] = 3
+
+        elif args.dataset == 'MoNuSAC':
+            # x = scio.loadmat('{:s}/{:s}.mat'.format(label_dir, name))
+            inst_label = scio.loadmat('{:s}/{:s}.mat'.format(label_dir, name))['inst_map']
+            cls_label = scio.loadmat('{:s}/{:s}.mat'.format(label_dir, name))['type_map']
+            inst_label[cls_label == 5] = 0
+            cls_label[cls_label == 5] = 0
+            inst_label = remap_label(inst_label)
+
+        inst_label = inst_label.astype(np.int32)
 
         ''' preprocess '''
         input_image, original_image_size, input_size = img_preprocessing(image, model)
         # load or generate prompt
         if args.auto_prompt:
-            with open(os.path.join('/home/data1/my/Project/yolov5/runs/detect/exp/labels/', name + '.txt'), 'r') as f:
-                lines = f.readlines()
-                boxes_orig_scale = np.zeros(shape=(len(lines), 4))
-                for box_idx, line in enumerate(lines):
-                    _, x, y, box_w, box_h = line.replace('\n', '').split(' ')
-                    miny = float(x) * w - 0.5 * float(box_w) * w
-                    maxy = float(x) * w + 0.5 * float(box_w) * w
-                    minx = float(y) * h - 0.5 * float(box_h) * h
-                    maxx = float(y) * h + 0.5 * float(box_h) * h
-                    boxes_orig_scale[box_idx] = np.array([miny, minx, maxy, maxx])
-            boxes = get_scaled_prompt(boxes_orig_scale, model, original_image_size)
+            # if not prompts were predicted
+            if not os.path.exists(os.path.join(args.box_txt, name + '.txt')):
+                # boxes_orig_scale = np.empty(shape=(1, 4))
+                # boxes = get_scaled_prompt(boxes_orig_scale, model, original_image_size)
+                # cls_orig_scale = np.ones(shape=(boxes_orig_scale.shape[0], 1))
+                boxes = torch.empty(size=(0, 4))
+                cls_orig_scale = torch.empty(size=(0, 1))
+            else:
+                with open(os.path.join(args.box_txt, name + '.txt'), 'r') as f:
+                    lines = f.readlines()
+                    boxes_orig_scale = np.zeros(shape=(len(lines), 4))
+                    cls_orig_scale = np.zeros(shape=(len(lines), 1))
+                    for box_idx, line in enumerate(lines):
+                        cls, x, y, box_w, box_h = line.replace('\n', '').split(' ')
+                        miny = float(x) * w - 0.5 * float(box_w) * w
+                        maxy = float(x) * w + 0.5 * float(box_w) * w
+                        minx = float(y) * h - 0.5 * float(box_h) * h
+                        maxx = float(y) * h + 0.5 * float(box_h) * h
+                        boxes_orig_scale[box_idx] = np.array([miny, minx, maxy, maxx])
+                        cls_orig_scale[box_idx] = np.array([int(cls) + 1])
+                boxes = get_scaled_prompt(boxes_orig_scale, model, original_image_size)
         else:
             boxes_orig_scale, masks = generate_boxes_prompt_all_inst(inst_label)
             boxes = get_scaled_prompt(boxes_orig_scale, model, original_image_size)
+            cls_orig_scale = np.ones(shape=(boxes_orig_scale.shape[0], 1))
 
         box_num = boxes.shape[0]
         if box_num % points_batch_size == 0:
@@ -240,31 +330,50 @@ def main():
 
         ############################### post proc ################################################
         # nms
-        iou_pred_list = torch.cat(iou_pred_list, dim=0)
-        selected_masks = non_max_suppression(per_img_mask_list, iou_pred_list, 0.5)
-        for per_inst_mask in selected_masks:
-            res_mask[per_inst_mask == 1] = inst_id
-            inst_id += 1
-        # 根据标记删除小连通域
-        filtered_label_image = morph.remove_small_objects(res_mask, min_size=args.min_area)
-        # 将标签图像转换回二值图像
-        sem_pred = (filtered_label_image > 0).astype(np.uint8)
+        if batch_num != 0: # if prompts are given
+            iou_pred_list = torch.cat(iou_pred_list, dim=0)
+            selected_masks, remain_idx = non_max_suppression(per_img_mask_list, iou_pred_list, 0.5)
+            cls_orig_scale_nms = cls_orig_scale[remain_idx]
+            for id, per_inst_mask in enumerate(selected_masks):
+                res_mask[per_inst_mask == 1] = inst_id
+                res_cls_mask[per_inst_mask == 1] = cls_orig_scale_nms[id]
+                inst_id += 1
+            # 根据标记删除小连通域
+            filtered_label_image = morph.remove_small_objects(res_mask, min_size=args.min_area)
+            # 将标签图像转换回二值图像
+            sem_pred = (filtered_label_image > 0).astype(np.uint8)
+        else:
+            filtered_label_image = np.zeros_like(inst_label)
+            sem_pred = np.zeros_like(inst_label)
+            res_cls_mask = np.zeros_like(cls_label)
+
+        if args.dataset == 'MoNuSAC':
+            filtered_label_image[cls_label == 5] = 0
+            filtered_label_image = morph.remove_small_objects(res_mask, min_size=args.min_area)
+            sem_pred = (filtered_label_image > 0).astype(np.uint8)
+            res_cls_mask[filtered_label_image == 0] = 0
+
         # TODO: remap the
         inst_pred = utils.remap_label(filtered_label_image)
+
+        pred_dict[name] = generate_cls_info(inst_pred, res_cls_mask)
+        true_dict[name] = generate_cls_info(inst_label, cls_label)
 
         if eval_flag:
             label_img = np.array(inst_label != 0, dtype=np.uint8)
             label_vis = draw_rand_inst_color(inst_label)
             pred_vis = draw_rand_inst_color(inst_pred)
+            pred_overlay = draw_inst_overlay(image, inst_pred, res_cls_mask)
 
             for box in boxes_orig_scale:
                 cv2.rectangle(pred_vis,
                               (round(box[0]), round(box[1])),
                               (round(box[2]), round(box[3])), (0, 0, 255), 3)
 
-            img_show = np.concatenate([np.array(orig_img),
+            img_show = np.concatenate([image,
                                        label_vis,
-                                       pred_vis],
+                                       pred_vis,
+                                       pred_overlay],
                                        axis=1)
             cv2.imwrite('{:s}/{}.png'.format(vis_maps_folder, name), img_show)
             np.save('{:s}/{}.npy'.format(prob_maps_folder, name), sem_pred)
@@ -286,8 +395,13 @@ def main():
             # get instance metrics
             if args.dataset == 'GlaS':
                 accumulated_metrics += utils.gland_accuracy_object_level_all_images(inst_pred, inst_label)
-            if args.dataset == 'MoNuSeg':
-                aji_img = utils.get_fast_aji(inst_label, inst_pred)
+            if args.dataset in ['MoNuSeg', 'CoNSeP', 'MoNuSAC']:
+                # x = np.max(inst_label)
+                # y = np.max(inst_pred)
+                if np.max(inst_label) != 0 and np.max(inst_pred) == 0:
+                    aji_img = 0
+                else:
+                    aji_img = utils.get_fast_aji(inst_label, inst_pred)
                 aji += aji_img
                 dq_sq_pq, _ = utils.get_fast_pq(inst_label, inst_pred)
                 nuclei_pq += dq_sq_pq[2]
@@ -328,11 +442,20 @@ def main():
         save_results(header, [F1, obj_dice, haus], {},
                      f'{save_dir:s}/test_result_epoch{epoch}_obj_dice_{obj_dice:.4f}_obj_haus_{haus:.4f}.txt')
 
-
-    elif args.dataset == 'MoNuSeg':
-        header = ['aji', 'pq']
-        save_results(header, [aji / len(img_names), nuclei_pq / len(img_names)], {},
+    elif args.dataset in ['MoNuSeg', 'CoNSeP', 'MoNuSAC']:
+        results_list = run_nuclei_type_stat(pred_dict, true_dict, _20x=False)
+        print(results_list)
+        header = ['aji', 'pq', 'f1', 'f2', 'f3', 'f4']
+        save_results(header, [aji / len(img_names), nuclei_pq / len(img_names),
+                              results_list[-4], results_list[-3], results_list[-2], results_list[-1]],
+                     {},
                      f'{save_dir:s}/test_result_epoch{epoch}_aji_{aji / len(img_names):.4f}_pq_{nuclei_pq / len(img_names):.4f}.txt')
+
+        # header = ['aji', 'pq']
+        # save_results(header, [aji / len(img_names), nuclei_pq / len(img_names)],
+        #              {},
+        #              f'{save_dir:s}/test_result_epoch{epoch}_aji_{aji / len(img_names):.4f}_pq_{nuclei_pq / len(img_names):.4f}.txt')
+
 
 def chunks(lst, num_workers=None, n=None):
     """
@@ -389,8 +512,13 @@ def get_overall_valid_score(pred_image_path, groundtruth_path, dataset_name, num
 
             if dataset_name == 'GlaS':
                 groundtruth = np.asarray(Image.open(groundtruth_path + f"/{im_name}_anno.bmp"))
-            elif dataset_name == 'MoNuSeg':
+            elif dataset_name in ['MoNuSeg', 'CoNSeP']:
                 groundtruth = scio.loadmat(groundtruth_path + f"/{im_name}.mat")['inst_map']
+            elif dataset_name == 'MoNuSAC':
+                groundtruth = scio.loadmat(groundtruth_path + f"/{im_name}.mat")['inst_map']
+                cls_gt = scio.loadmat(groundtruth_path + f"/{im_name}.mat")['type_map']
+                groundtruth[cls_gt == 5] = 0
+
             groundtruth = np.array(groundtruth != 0, dtype=np.uint8).reshape(-1)
 
             gt_list.extend(groundtruth)

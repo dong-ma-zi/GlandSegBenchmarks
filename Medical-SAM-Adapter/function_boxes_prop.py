@@ -69,7 +69,7 @@ def train_sam(args, net: nn.Module, optimizer,
     with tqdm(total=len(index), desc=f'Epoch {epoch}', unit='img') as pbar:
 
         for ind in index:
-            img = Image.open(train_img_list[ind])
+            img = Image.open(train_img_list[ind]).convert('RGB')
             # label = np.array(Image.open(train_anno_list[ind]))
             label = scio.loadmat(train_anno_list[ind])['inst_map']
 
@@ -143,7 +143,7 @@ def train_sam(args, net: nn.Module, optimizer,
 def validation_sam(args, net: nn.Module,
                    val_img_list,
                    val_anno_list):
-    boxes_batch_size = 8
+    boxes_batch_size = 16
 
     batch_tot, batch_acc, batch_iou = 0, 0, 0
     tot, tot_acc, tot_iou = 0, 0, 0
@@ -154,7 +154,7 @@ def validation_sam(args, net: nn.Module,
     index = list(range(len(val_img_list)))
     with tqdm(total=len(index), desc='Validation round', unit='batch') as pbar:
         for ind in index:
-            img = Image.open(val_img_list[ind])
+            img = Image.open(val_img_list[ind]).convert('RGB')
             # label = np.array(Image.open(val_anno_list[ind]))
             label = scio.loadmat(val_anno_list[ind])['inst_map']
 

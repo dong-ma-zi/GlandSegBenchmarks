@@ -2,7 +2,7 @@
 #!/usr/bin/env	python3
 
 """ train network using pytorch
-    Junde Wu
+    MingYu
 """
 import glob
 
@@ -19,18 +19,8 @@ args = cfg.parse_args()
 os.environ['CUDA_VISIBLE_DEVICES'] = ','.join(str(x) for x in [args.gpu_device])
 GPUdevice = torch.device('cuda', args.gpu_device)
 '''load and load pretrained model'''
-net = get_network(args, args.net, vit_mode='vit_h', gpu_device=GPUdevice,)
+net = get_network(args, args.net, vit_mode='vit_b', gpu_device=GPUdevice,)
 
-# load pretrained weights
-# net.load_state_dict(torch.load("/home/data1/my/Project/GlandSegBenchmark/Medical-SAM-Adapter/logs_p_ck1106/"
-#                                "monuseg-samAdpt-b-1024-16-256-cent-prpen_2023_11_06_15_21/"
-#                                "Model/checkpoint_20.pth", map_location='cpu')['state_dict'])
-
-
-# net.load_state_dict(torch.load("/home/data1/my/Project/GlandSegBenchmark/"
-#                                "Medical-SAM-Adapter/logs_p_ck1106/"
-#                                "monuseg-samAdpt-b-1024-16-256-cent_2023_11_06_15_10/"
-#                                "Model/checkpoint_30.pth", map_location='cpu')['state_dict'])
 
 if args.net == 'sam_adpt':
     # n_list = [n for n, _ in net.named_parameters()]
@@ -63,37 +53,34 @@ logger.info(args)
 
 # ----- load data ----- #
 
-data_path = {'train': '/home/data2/MedImg/GlandSeg/GlaS/train',
-             'val': '/home/data2/MedImg/GlandSeg/GlaS/test_proc'}
+# data_path = {'train': '/home/data2/MedImg/GlandSeg/GlaS/train',
+#              'val': '/home/data2/MedImg/GlandSeg/GlaS/test_proc'}
 
 # data_path = {'train': '/home/data2/MedImg/NucleiSeg/MoNuSeg/Train',
 #              'val': '/home/data2/MedImg/NucleiSeg/MoNuSeg/Test'}
 
+# data_path = {'train': '/home/data1/my/dataset/consep/Train',
+#              'val': '/home/data1/my/dataset/consep/Test'}
+
+data_path = {'train': '/home/data1/my/dataset/monusac/Train',
+             'val': '/home/data1/my/dataset/monusac/Test'}
 
 train_img_list = sorted(glob.glob(os.path.join(data_path['train'], 'Images/*')))
 train_anno_list = []
 for i in train_img_list:
     img_name = os.path.basename(i).split('.')[0]
-    train_anno_list += [os.path.join(data_path['train'], 'Annotation', img_name + '_anno.bmp')]
+    # train_anno_list += [os.path.join(data_path['train'], 'Annotation', img_name + '_anno.bmp')]
     # train_anno_list += [os.path.join(data_path['train'], 'Annotation', img_name + '.mat')]
-# train_anno_list = sorted(glob.glob(os.path.join(data_path['train'], 'Annotation/*')))
+    train_anno_list += [os.path.join(data_path['train'], 'Labels', img_name + '.mat')]
 
 val_img_list = sorted(glob.glob(os.path.join(data_path['val'], 'Images/*')))
 val_anno_list = []
 for i in val_img_list:
     img_name = os.path.basename(i).split('.')[0]
-    val_anno_list += [os.path.join(data_path['val'], 'Annotation', img_name + '_anno.bmp')]
+    # val_anno_list += [os.path.join(data_path['val'], 'Annotation', img_name + '_anno.bmp')]
     # val_anno_list += [os.path.join(data_path['val'], 'Annotation', img_name + '.mat')]
-# val_anno_list = sorted(glob.glob(os.path.join(data_path['val'], 'Annotation/*')))
+    val_anno_list += [os.path.join(data_path['val'], 'Labels', img_name + '.mat')]
 
-# '''checkpoint path and tensorboard'''
-# # iter_per_epoch = len(Glaucoma_training_loader)
-# checkpoint_path = os.path.join(settings.CHECKPOINT_PATH, args.net, settings.TIME_NOW)
-#
-# # create checkpoint folder to save model
-# if not os.path.exists(checkpoint_path):
-#     os.makedirs(checkpoint_path)
-# checkpoint_path = os.path.join(checkpoint_path, '{net}-{epoch}-{type}.pth')
 
 '''begain training'''
 scaler = torch.cuda.amp.GradScaler()
